@@ -27,6 +27,11 @@ describe("detectBillingType", () => {
     expect(await detectBillingType({ env: { OPENAI_API_KEY: "sk-x" }, authPath: path })).toBe("metered");
   });
 
+  it("ignores empty-string env keys (not a credential)", async () => {
+    const path = authFile(JSON.stringify({ auth_mode: "chatgpt" }));
+    expect(await detectBillingType({ env: { OPENAI_API_KEY: "" }, authPath: path })).toBe("subscription");
+  });
+
   it("reports unknown when auth.json is missing", async () => {
     expect(await detectBillingType({ env: {}, authPath: "/nonexistent/auth.json" })).toBe("unknown");
   });

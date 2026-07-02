@@ -7,7 +7,7 @@ export async function detectBillingType(opts: {
   env: Record<string, string>;
   authPath: string;
 }): Promise<BillingType> {
-  if (ENV_KEY_NAMES.some((k) => opts.env[k] !== undefined)) return "metered";
+  if (ENV_KEY_NAMES.some((k) => (opts.env[k] ?? "") !== "")) return "metered";
 
   let authMode: unknown;
   try {
