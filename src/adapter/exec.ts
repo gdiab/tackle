@@ -69,6 +69,10 @@ export async function runCommand(opts: {
     // 'close' waits for stdio EOF; a grandchild inheriting stdout can hold the
     // pipe open indefinitely, so also resolve after a grace window post-'exit'.
     child.on("exit", (code) => {
+      // The hard timeout governs the child's lifetime, which has just ended;
+      // clear it so it cannot fire later (e.g. during the grace window below)
+      // and retroactively mark an already-finished, on-time turn as timed out.
+      clearTimeout(timer);
       exitCode = code;
       graceTimer = setTimeout(() => {
         child.stdout.destroy();

@@ -73,6 +73,20 @@ describe("runCommand", () => {
     expect(Date.now() - start).toBeLessThan(10_000);
   });
 
+  it("does not mark timedOut when the child exits before the deadline but streams settle in the grace window", async () => {
+    const result = await runCommand({
+      cmd: process.execPath,
+      args: ["-e", `require("child_process").spawn("sleep", ["30"], { stdio: "inherit" }).unref(); console.log("done");`],
+      cwd: process.cwd(),
+      env: nodeEnv,
+      timeoutMs: 2_000,
+      streamGraceMs: 3_000,
+    });
+    expect(result.timedOut).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("done");
+  });
+
   it("kills the child and flags timedOut on timeout", async () => {
     const start = Date.now();
     const result = await runCommand({

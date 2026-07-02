@@ -15,16 +15,20 @@ const DEFAULT_TIMEOUT_MS = 600_000;
 export class CodexAdapter implements Adapter {
   readonly name = "codex";
   private readonly baseEnv: Record<string, string | undefined>;
-  private readonly authPath: string;
+  private readonly authPathOverride?: string;
 
   constructor(opts: { baseEnv?: Record<string, string | undefined>; authPath?: string } = {}) {
     this.baseEnv = opts.baseEnv ?? process.env;
-    this.authPath = opts.authPath ?? join(homedir(), ".codex", "auth.json");
+    this.authPathOverride = opts.authPath;
   }
 
   async run(req: TurnRequest): Promise<TurnResult> {
     const env = buildAdapterEnv({ base: this.baseEnv, allow: ["PATH", "HOME"] });
-    const billingType = await detectBillingType({ env, authPath: this.authPath });
+    // codex itself resolves ~/.codex from this same allowlist-built env.HOME;
+    // deriving the default authPath from it (rather than the process's own
+    // homedir()) keeps the billing check pointed at the subprocess's actual home.
+    const authPath = this.authPathOverride ?? join(env.HOME ?? homedir(), ".codex", "auth.json");
+    const billingType = await detectBillingType({ env, authPath });
     const baseRef = await resolveHead(req.workdir);
     const command = buildPrintCommand({
       prompt: req.prompt,
@@ -57,10 +61,10 @@ export class CodexAdapter implements Adapter {
       },
     });
 
-    // Capture the diff before writing the transcript file: the transcript itself
-    // lives under <workdir>/.tackle/ and would otherwise show up as an untracked
-    // file in the diff. But the transcript is the durable artifact — it must land
-    // on disk even if diff capture fails, so defer any diff error until after.
+    // Capture the diff before writing the transcript file. captureWorkdirDiff
+    // already excludes .tackle/ (harness state, not part of the turn's diff),
+    // but the transcript is the durable artifact regardless — it must land on
+    // disk even if diff capture fails, so defer any diff error until after.
     let workdirDiff = "";
     let diffError: unknown;
     try {

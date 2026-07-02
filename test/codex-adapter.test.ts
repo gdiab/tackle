@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -112,5 +112,21 @@ describe("CodexAdapter", () => {
     const adapter = makeAdapter({ fixture: join(fixturesDir, "codex-completed.jsonl") });
     const result = await adapter.run({ prompt: "p", workdir, effort: "medium" });
     expect(result.workdirDiff).toContain("+changed by agent");
+  });
+
+  it("derives the default authPath from the subprocess HOME", async () => {
+    const workdir = makeRepo();
+    const home = mkdtempSync(join(tmpdir(), "tackle-home-"));
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    // auth_mode "apikey" (-> "metered") is deliberately the opposite of whatever
+    // this developer's *real* homedir() might contain, so the test only goes
+    // green if the adapter actually reads from the fake HOME above rather than
+    // from process homedir() -- a real ~/.codex/auth.json with auth_mode
+    // "chatgpt" would otherwise make this assertion pass for the wrong reason.
+    writeFileSync(join(home, ".codex", "auth.json"), JSON.stringify({ auth_mode: "apikey" }));
+    writeFileSync(join(home, ".fake-codex.json"), JSON.stringify({ fixture: join(fixturesDir, "codex-completed.jsonl") }));
+    const adapter = new CodexAdapter({ baseEnv: { PATH: `${fakesDir}:${process.env.PATH}`, HOME: home } });
+    const result = await adapter.run({ prompt: "p", workdir, effort: "medium" });
+    expect(result.usage.billingType).toBe("metered");
   });
 });

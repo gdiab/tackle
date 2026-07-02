@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -69,5 +69,16 @@ describe("workdir diff", () => {
     git("commit", "-q", "-m", "agent commit");
     const diff = await captureWorkdirDiff(dir, base);
     expect(diff).toContain("+committed change");
+  });
+
+  it("excludes harness state under .tackle/ from the diff", async () => {
+    const dir = makeRepo();
+    const base = await resolveHead(dir);
+    mkdirSync(join(dir, ".tackle", "transcripts"), { recursive: true });
+    writeFileSync(join(dir, ".tackle", "transcripts", "old-turn.jsonl"), "{}\n");
+    writeFileSync(join(dir, "real-change.txt"), "content\n");
+    const diff = await captureWorkdirDiff(dir, base);
+    expect(diff).toContain("real-change.txt");
+    expect(diff).not.toContain(".tackle");
   });
 });

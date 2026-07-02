@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { Command, InvalidArgumentError, Option } from "commander";
@@ -41,8 +42,23 @@ export function buildProgram(opts: { adapter?: Adapter; writeOut?: (s: string) =
   return program;
 }
 
-const isMain =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+// argv[1] can be a symlink (e.g. a node_modules/.bin shim from `pnpm link`);
+// realpath it before comparing so this still resolves to true through a link.
+function isMainModule(): boolean {
+  if (process.argv[1] === undefined) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
+
+const isMain = isMainModule();
 if (isMain) {
-  buildProgram().parseAsync(process.argv);
+  buildProgram()
+    .parseAsync(process.argv)
+    .catch((err: unknown) => {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    });
 }
