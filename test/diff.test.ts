@@ -47,6 +47,19 @@ describe("workdir diff", () => {
     expect(diff).toContain("+fresh");
   });
 
+  it("captures untracked files with non-ASCII names", async () => {
+    const dir = makeRepo();
+    const base = await resolveHead(dir);
+    writeFileSync(join(dir, "café-ñ.txt"), "unicode content\n");
+    const diff = await captureWorkdirDiff(dir, base);
+    expect(diff).toContain("+unicode content");
+  });
+
+  it("throws (not silently succeeds) for a non-git workdir", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tackle-nogit-"));
+    await expect(captureWorkdirDiff(dir, "HEAD")).rejects.toThrow();
+  });
+
   it("captures commits the turn made (diff vs pre-turn ref)", async () => {
     const dir = makeRepo();
     const base = await resolveHead(dir);

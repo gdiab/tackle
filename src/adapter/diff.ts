@@ -17,15 +17,19 @@ export async function resolveHead(workdir: string): Promise<string> {
 export async function captureWorkdirDiff(workdir: string, baseRef: string): Promise<string> {
   const tracked = await git(workdir, ["diff", baseRef]);
 
-  const untrackedList = (await git(workdir, ["ls-files", "--others", "--exclude-standard"]))
-    .split("\n")
+  const untrackedList = (await git(workdir, ["ls-files", "-z", "--others", "--exclude-standard"]))
+    .split("\0")
     .filter((f) => f.length > 0);
 
   const untrackedDiffs: string[] = [];
   for (const file of untrackedList) {
     // git diff --no-index exits 1 when files differ; that is the expected case
     const diff = await git(workdir, ["diff", "--no-index", "--", "/dev/null", file]).catch(
-      (err: { stdout?: string }) => err.stdout ?? "",
+      (err: { code?: number; stdout?: string }) => {
+        if (err.code === 1 && typeof err.stdout === "string" && err.stdout.length > 0)
+          return err.stdout;
+        throw err;
+      },
     );
     untrackedDiffs.push(diff);
   }
