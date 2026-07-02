@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -20,7 +20,12 @@ function makeRepo(): string {
   return dir;
 }
 
-function makeAdapter(knobs: { fixture?: string; exitCode?: number; sleepMs?: number }) {
+function makeAdapter(knobs: {
+  fixture?: string;
+  exitCode?: number;
+  sleepMs?: number;
+  deleteGitDir?: boolean;
+}) {
   const home = mkdtempSync(join(tmpdir(), "tackle-home-"));
   writeFileSync(join(home, "auth.json"), JSON.stringify({ auth_mode: "chatgpt" }));
   writeFileSync(join(home, ".fake-codex.json"), JSON.stringify(knobs));
@@ -85,6 +90,20 @@ describe("CodexAdapter", () => {
     });
     const result = await adapter.run({ prompt: "p", workdir, effort: "medium", timeoutMs: 1_000 });
     expect(result.status).toBe("timeout");
+  });
+
+  it("writes the transcript even when diff capture fails", async () => {
+    const workdir = makeRepo();
+    const adapter = makeAdapter({
+      fixture: join(fixturesDir, "codex-completed.jsonl"),
+      deleteGitDir: true,
+    });
+    await expect(adapter.run({ prompt: "p", workdir, effort: "medium" })).rejects.toThrow();
+    const transcripts = readdirSync(join(workdir, ".tackle", "transcripts"));
+    expect(transcripts).toHaveLength(1);
+    expect(
+      readFileSync(join(workdir, ".tackle", "transcripts", transcripts[0]!), "utf8"),
+    ).toContain('"turn.completed"');
   });
 
   it("captures the diff when the turn changes files", async () => {

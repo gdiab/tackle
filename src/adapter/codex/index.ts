@@ -59,8 +59,15 @@ export class CodexAdapter implements Adapter {
 
     // Capture the diff before writing the transcript file: the transcript itself
     // lives under <workdir>/.tackle/ and would otherwise show up as an untracked
-    // file in the diff.
-    const workdirDiff = await captureWorkdirDiff(req.workdir, baseRef);
+    // file in the diff. But the transcript is the durable artifact — it must land
+    // on disk even if diff capture fails, so defer any diff error until after.
+    let workdirDiff = "";
+    let diffError: unknown;
+    try {
+      workdirDiff = await captureWorkdirDiff(req.workdir, baseRef);
+    } catch (err) {
+      diffError = err;
+    }
 
     const transcriptDir = join(req.workdir, ".tackle", "transcripts");
     await mkdir(transcriptDir, { recursive: true });
@@ -69,6 +76,8 @@ export class CodexAdapter implements Adapter {
       `${new Date().toISOString().replace(/[:.]/g, "-")}-codex.jsonl`,
     );
     await writeFile(transcriptRef, rawLines.join("\n") + "\n");
+
+    if (diffError !== undefined) throw diffError;
 
     let status: TurnResult["status"];
     if (exec.timedOut) status = "timeout";

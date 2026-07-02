@@ -11,5 +11,6 @@ try {
 process.stdin.on("data", () => {});
 process.stdin.on("end", () => {
   if (knobs.fixture) process.stdout.write(fs.readFileSync(knobs.fixture, "utf8"));
+  if (knobs.deleteGitDir) fs.rmSync(".git", { recursive: true, force: true });
   setTimeout(() => process.exit(knobs.exitCode ?? 0), knobs.sleepMs ?? 0);
 });
