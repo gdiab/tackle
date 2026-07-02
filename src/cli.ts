@@ -1,4 +1,6 @@
+#!/usr/bin/env node
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 
 const require = createRequire(import.meta.url);
@@ -10,7 +12,8 @@ export function buildProgram(): Command {
   return program;
 }
 
-const isMain = process.argv[1]?.endsWith("cli.ts") || process.argv[1]?.endsWith("cli.js");
+const isMain =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   buildProgram().parseAsync(process.argv);
 }
