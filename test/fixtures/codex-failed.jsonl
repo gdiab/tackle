@@ -1,0 +1,3 @@
+{"type":"thread.started","thread_id":"019f23af-0000-0000-0000-c4d44bb55af1"}
+{"type":"turn.started"}
+{"type":"turn.failed","error":{"message":"stream error: unexpected status 401"}}
