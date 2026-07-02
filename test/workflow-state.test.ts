@@ -41,6 +41,13 @@ describe("workflow state", () => {
     await writeFile(join(dir, ".tackle", "workflow.json"), JSON.stringify({ version: 2 }));
     await expect(readWorkflowState(dir)).rejects.toThrow(/version/);
   });
+
+  it("throws a readable error when the state file parses to something other than an object", async () => {
+    const dir = await tempWorkdir();
+    await mkdir(join(dir, ".tackle"), { recursive: true });
+    await writeFile(join(dir, ".tackle", "workflow.json"), "null");
+    await expect(readWorkflowState(dir)).rejects.toThrow(/fix or delete it to reset the workflow/);
+  });
 });
 
 describe("policy config", () => {
@@ -55,6 +62,21 @@ describe("policy config", () => {
     const policy = await loadPolicyConfig(dir);
     expect(policy.deterministicRetries).toBe(0);
     expect(policy.reviewLoopIterations).toBe(DEFAULT_POLICY.reviewLoopIterations);
+  });
+
+  it("throws a readable error when config.json parses to something other than an object", async () => {
+    const dir = await tempWorkdir();
+    await mkdir(join(dir, ".tackle"), { recursive: true });
+    await writeFile(join(dir, ".tackle", "config.json"), JSON.stringify("nope"));
+    await expect(loadPolicyConfig(dir)).rejects.toThrow(/must contain a JSON object/);
+  });
+
+  it("clamps a negative deterministicRetries to 0", async () => {
+    const dir = await tempWorkdir();
+    await mkdir(join(dir, ".tackle"), { recursive: true });
+    await writeFile(join(dir, ".tackle", "config.json"), JSON.stringify({ deterministicRetries: -5 }));
+    const policy = await loadPolicyConfig(dir);
+    expect(policy.deterministicRetries).toBe(0);
   });
 });
 

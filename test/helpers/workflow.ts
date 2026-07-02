@@ -40,6 +40,18 @@ export function scriptedAdapter(
 export const approveAll: Presenter = { askApproval: async () => true, inform: () => {} };
 export const rejectAll: Presenter = { askApproval: async () => false, inform: () => {} };
 
+/** Presenter that records every inform() message for assertions. */
+export function capturingPresenter(approve: boolean): Presenter & { messages: string[] } {
+  const messages: string[] = [];
+  return {
+    messages,
+    askApproval: async () => approve,
+    inform: (message: string) => {
+      messages.push(message);
+    },
+  };
+}
+
 export async function tempWorkdir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "tackle-phase-"));
 }

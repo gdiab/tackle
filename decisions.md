@@ -23,3 +23,14 @@ exits 0, so `tackle plan && tackle build` chains safely. **Rejected:** a separat
 `tackle approve` command (a second command per phase in the common path, and two
 sources of truth for gate state); auto-approve on artifact-exists (violates
 attended-first).
+
+## D-005 · 2026-07-02 · Billing gate fails closed: only `subscription` passes
+
+The phase runner halts a turn whose `billingType` is `metered` OR `unknown` — SPEC's
+deterministic gate is `billing_type == subscription`, and unknown means the adapter
+could not verify the auth mode, which is exactly when silent metered billing happens
+(SPEC design principle 3 calls a stray metered turn a bug, not a warning). **Rejected:**
+warn-and-proceed on unknown (silent-metered risk contradicts the fail-closed posture);
+halting only on metered (leaves the unrecognized-auth-mode case open). Revisit when a
+non-Codex adapter with no billing concept lands (Phase 3) — likely via a per-adapter
+config, not by weakening the default.

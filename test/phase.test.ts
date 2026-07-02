@@ -6,6 +6,7 @@ import { runPhase } from "../src/workflow/phase.js";
 import { readWorkflowState } from "../src/workflow/state.js";
 import {
   approveAll,
+  capturingPresenter,
   fakeTurn,
   rejectAll,
   scriptedAdapter,
@@ -78,6 +79,25 @@ describe("runPhase deterministic gates", () => {
     });
     expect(outcome).toBe("halted");
     expect(adapter.prompts).toHaveLength(1);
+  });
+
+  it("halts immediately on an unknown-billing turn without retrying (fail-closed gate)", async () => {
+    const dir = await tempWorkdir();
+    const presenter = capturingPresenter(true);
+    const adapter = scriptedAdapter([
+      writesArtifact(".tackle/specs.md", "# specs", {
+        usage: { tokens: EMPTY_USAGE, billingType: "unknown" },
+      }),
+    ]);
+    const outcome = await runPhase({
+      phase: "specs", workdir: dir, adapter, presenter, canEnter: true, request: "r",
+    });
+    expect(outcome).toBe("halted");
+    expect(adapter.prompts).toHaveLength(1);
+    expect((await readWorkflowState(dir))?.phases.specs?.status).toBe("halted");
+    expect(presenter.messages.some((m) => m.includes("billing type unknown"))).toBe(true);
+    // distinct from the metered message
+    expect(presenter.messages.some((m) => m.includes("billed metered"))).toBe(false);
   });
 
   it("respects deterministicRetries from .tackle/config.json", async () => {

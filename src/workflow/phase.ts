@@ -95,8 +95,16 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
     }
     await removeArtifact(workdir, BUILD_DIFF_FILE);
     await writeWorkflowState(workdir, state);
-  } else if (opts.request !== undefined) {
-    state.request = opts.request; // amending the ask on a re-run; persisted below
+  }
+
+  // -- entry-flag guard: an entry-capable command mid-workflow must target the
+  // workflow's own entry phase, or it silently degrades into an amend. -------
+  if (state !== null && opts.canEnter && opts.fresh !== true && opts.phase !== state.entry) {
+    presenter.inform(
+      `a workflow is already in progress (entered at ${state.entry}); ` +
+        `pass --fresh to start a new workflow at ${opts.phase}`,
+    );
+    return "halted";
   }
 
   if (PHASE_ORDER.indexOf(opts.phase) < PHASE_ORDER.indexOf(state.entry)) {
@@ -125,12 +133,28 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
   const own = state.phases[opts.phase];
   if (own !== undefined && opts.redo !== true) {
     if (own.status === "approved") {
+      if (opts.request !== undefined) {
+        presenter.inform(`ignoring the request argument; pass --redo to amend an already-approved ${opts.phase}`);
+      }
       presenter.inform(`${opts.phase} is already approved; pass --redo to run it again`);
       return "approved";
     }
     if (own.status === "awaiting_approval") {
+      if (opts.request !== undefined) {
+        presenter.inform(
+          `ignoring the request argument; pass --redo to amend ${opts.phase} instead of re-presenting the gate`,
+        );
+      }
       return (await presentGate(opts.phase, state, opts)) ? "approved" : "rejected";
     }
+  }
+
+  // Amending the request only takes effect when a turn is actually about to run:
+  // the two early returns above must leave a re-presented (or already-approved)
+  // artifact's provenance intact rather than silently rewriting the ask it was
+  // built from.
+  if (opts.request !== undefined) {
+    state.request = opts.request;
   }
 
   // -- running (or re-running) this phase invalidates everything after it ------
@@ -142,7 +166,10 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
   if (PHASE_ORDER.indexOf(opts.phase) <= PHASE_ORDER.indexOf("build")) {
     await removeArtifact(workdir, BUILD_DIFF_FILE);
   }
-  // A stale artifact must not satisfy the gate for a fresh turn.
+  // A stale artifact must not satisfy the gate for a fresh turn. Trade-off: a
+  // process killed between turn completion and the state write below will
+  // re-run (and re-bill) the turn on the next invocation, since there is no
+  // way to tell "artifact written, state write pending" from "no turn ran yet".
   await removeArtifact(workdir, def.artifact);
   await writeWorkflowState(workdir, state);
 
@@ -177,12 +204,17 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
     });
     lastTurn = result;
 
-    // Billing gate: no retry — re-running would bill metered again.
-    if (result.usage.billingType === "metered") {
+    // Billing gate: fail closed — only "subscription" passes (SPEC "Gate
+    // semantics": billing_type == subscription). No retry — re-running would
+    // bill metered again, or leave an unverified auth mode unverified again.
+    if (result.usage.billingType !== "subscription") {
       state.phases[opts.phase] = { status: "halted", lastTurn: toTurnRecord(result) };
       await writeWorkflowState(workdir, state);
       presenter.inform(
-        "halted: turn billed metered; fix adapter auth before re-running (subscription-before-API gate)",
+        result.usage.billingType === "metered"
+          ? "halted: turn billed metered; fix adapter auth before re-running (subscription-before-API gate)"
+          : "halted: could not verify subscription billing (billing type unknown); refusing to proceed " +
+              "— check the adapter's auth (e.g. ~/.codex/auth.json)",
       );
       return "halted";
     }
@@ -229,6 +261,12 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
     await writeFile(join(workdir, BUILD_DIFF_FILE), completed.workdirDiff);
     if (completed.workdirDiff.length === 0) presenter.inform("warning: build produced an empty diff");
   }
+
+  // Success: this phase's own questions file (if any) is spent. Removing it
+  // here — only on success — keeps a stale round of Q&A from poisoning a
+  // future --redo prompt, while leaving the clarification loop (answer in
+  // place, re-run) untouched, since that path never reaches here.
+  await removeArtifact(workdir, def.questionsFile);
 
   state.phases[opts.phase] = { status: "awaiting_approval", lastTurn: toTurnRecord(completed) };
   await writeWorkflowState(workdir, state);

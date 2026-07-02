@@ -5,6 +5,7 @@ import { runPhase } from "../src/workflow/phase.js";
 import { readWorkflowState } from "../src/workflow/state.js";
 import {
   approveAll,
+  capturingPresenter,
   fakeTurn,
   rejectAll,
   scriptedAdapter,
@@ -50,6 +51,26 @@ describe("clarification round-trip", () => {
     expect(outcome).toBe("approved");
     expect(second.prompts[0]).toContain("## Clarifying questions and answers");
     expect(second.prompts[0]).toContain("A: prod");
+  });
+
+  it("removes the questions file once the clarification round-trip succeeds", async () => {
+    const dir = await tempWorkdir();
+    const first = scriptedAdapter([
+      async (req) => {
+        await writeFile(join(req.workdir, ".tackle", "specs-questions.md"), "- which env?");
+        return fakeTurn();
+      },
+    ]);
+    await runPhase({
+      phase: "specs", workdir: dir, adapter: first, presenter: approveAll, canEnter: true, request: "vague ask",
+    });
+    await writeFile(join(dir, ".tackle", "specs-questions.md"), "- which env? A: prod");
+    const second = scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs")]);
+    const outcome = await runPhase({
+      phase: "specs", workdir: dir, adapter: second, presenter: approveAll, canEnter: true,
+    });
+    expect(outcome).toBe("approved");
+    await expect(readFile(join(dir, ".tackle", "specs-questions.md"), "utf8")).rejects.toThrow();
   });
 });
 
@@ -205,5 +226,106 @@ describe("entry, resume, and invalidation", () => {
     });
     expect(outcome).toBe("halted");
     expect(prAdapter.prompts).toHaveLength(0);
+  });
+
+  it("blocks a phase whose predecessor ended needs_clarification", async () => {
+    const dir = await tempWorkdir();
+    await runPhase({
+      phase: "specs", workdir: dir,
+      adapter: scriptedAdapter([
+        async (req) => {
+          await writeFile(join(req.workdir, ".tackle", "specs-questions.md"), "- which env?");
+          return fakeTurn();
+        },
+      ]),
+      presenter: approveAll, canEnter: true, request: "vague ask",
+    }); // specs left needs_clarification
+    const planAdapter = scriptedAdapter([writesArtifact(".tackle/plan.md", "# plan")]);
+    const outcome = await runPhase({
+      phase: "plan", workdir: dir, adapter: planAdapter, presenter: approveAll, canEnter: false,
+    });
+    expect(outcome).toBe("halted");
+    expect(planAdapter.prompts).toHaveLength(0);
+  });
+
+  it("halts an entry-capable command mid-workflow when it targets a phase other than the entry", async () => {
+    const dir = await tempWorkdir();
+    await runPhase({
+      phase: "plan", workdir: dir,
+      adapter: scriptedAdapter([writesArtifact(".tackle/plan.md", "# plan")]),
+      presenter: approveAll, canEnter: true, request: "fix",
+    }); // workflow entered at plan
+    const buildAdapter = scriptedAdapter([writesArtifact(".tackle/build-notes.md", "# notes")]);
+    const outcome = await runPhase({
+      phase: "build", workdir: dir, adapter: buildAdapter, presenter: approveAll, canEnter: true, request: "x",
+    });
+    expect(outcome).toBe("halted");
+    expect(buildAdapter.prompts).toHaveLength(0);
+  });
+
+  it("still allows re-running the workflow's own entry phase mid-workflow", async () => {
+    const dir = await tempWorkdir();
+    const adapter = scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs")]);
+    await runPhase({
+      phase: "specs", workdir: dir, adapter, presenter: approveAll, canEnter: true, request: "r",
+    });
+    const outcome = await runPhase({
+      phase: "specs", workdir: dir, adapter, presenter: approveAll, canEnter: true, redo: true,
+    });
+    expect(outcome).toBe("approved");
+    expect(adapter.prompts).toHaveLength(2);
+  });
+
+  it("does not amend state.request when re-presenting an awaiting_approval gate", async () => {
+    const dir = await tempWorkdir();
+    await runPhase({
+      phase: "specs", workdir: dir,
+      adapter: scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs")]),
+      presenter: rejectAll, canEnter: true, request: "original",
+    }); // left awaiting_approval
+    const adapter = scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs")]);
+    const presenter = capturingPresenter(true);
+    const outcome = await runPhase({
+      phase: "specs", workdir: dir, adapter, presenter, canEnter: true, request: "amended",
+    });
+    expect(outcome).toBe("approved");
+    expect(adapter.prompts).toHaveLength(0); // gate re-presented, no new turn
+    const state = await readWorkflowState(dir);
+    expect(state?.request).toBe("original");
+    expect(presenter.messages.some((m) => m.includes("--redo"))).toBe(true);
+  });
+
+  it("does not amend state.request when an already-approved phase is re-invoked without --redo", async () => {
+    const dir = await tempWorkdir();
+    const adapter = scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs")]);
+    await runPhase({
+      phase: "specs", workdir: dir, adapter, presenter: approveAll, canEnter: true, request: "original",
+    });
+    const presenter = capturingPresenter(true);
+    const outcome = await runPhase({
+      phase: "specs", workdir: dir, adapter, presenter, canEnter: true, request: "amended",
+    });
+    expect(outcome).toBe("approved");
+    expect(adapter.prompts).toHaveLength(1); // no new turn
+    const state = await readWorkflowState(dir);
+    expect(state?.request).toBe("original");
+    expect(presenter.messages.some((m) => m.includes("--redo"))).toBe(true);
+  });
+
+  it("--redo with a request argument amends state.request", async () => {
+    const dir = await tempWorkdir();
+    await runPhase({
+      phase: "specs", workdir: dir,
+      adapter: scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs v1")]),
+      presenter: approveAll, canEnter: true, request: "original",
+    });
+    const outcome = await runPhase({
+      phase: "specs", workdir: dir,
+      adapter: scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs v2")]),
+      presenter: approveAll, canEnter: true, redo: true, request: "amended",
+    });
+    expect(outcome).toBe("approved");
+    const state = await readWorkflowState(dir);
+    expect(state?.request).toBe("amended");
   });
 });

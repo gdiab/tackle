@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PolicyConfig, WorkflowState } from "./types.js";
 import { DEFAULT_POLICY } from "./types.js";
@@ -24,6 +24,9 @@ export async function readWorkflowState(workdir: string): Promise<WorkflowState 
   } catch {
     throw new Error(`${STATE_FILE} is not valid JSON; fix or delete it to reset the workflow`);
   }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${STATE_FILE} does not contain a JSON object; fix or delete it to reset the workflow`);
+  }
   const state = parsed as WorkflowState;
   if (state.version !== 1) throw new Error(`unsupported ${STATE_FILE} version; expected 1`);
   return state;
@@ -31,7 +34,10 @@ export async function readWorkflowState(workdir: string): Promise<WorkflowState 
 
 export async function writeWorkflowState(workdir: string, state: WorkflowState): Promise<void> {
   await mkdir(join(workdir, ".tackle"), { recursive: true });
-  await writeFile(join(workdir, STATE_FILE), JSON.stringify(state, null, 2) + "\n");
+  const target = join(workdir, STATE_FILE);
+  const tmp = `${target}.tmp`;
+  await writeFile(tmp, JSON.stringify(state, null, 2) + "\n");
+  await rename(tmp, target);
 }
 
 export async function loadPolicyConfig(workdir: string): Promise<PolicyConfig> {
@@ -43,5 +49,10 @@ export async function loadPolicyConfig(workdir: string): Promise<PolicyConfig> {
   } catch {
     throw new Error(`${CONFIG_FILE} is not valid JSON`);
   }
-  return { ...DEFAULT_POLICY, ...(parsed as Partial<PolicyConfig>) };
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${CONFIG_FILE} must contain a JSON object`);
+  }
+  const merged = { ...DEFAULT_POLICY, ...(parsed as Partial<PolicyConfig>) };
+  merged.deterministicRetries = Math.max(0, merged.deterministicRetries);
+  return merged;
 }
