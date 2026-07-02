@@ -15,6 +15,7 @@ export async function runCommand(opts: {
   cwd: string;
   env: Record<string, string>;
   timeoutMs: number;
+  streamGraceMs?: number;
   onLine?: (line: string) => void;
 }): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
@@ -45,16 +46,41 @@ export async function runCommand(opts: {
       rl.on("line", opts.onLine);
     }
 
-    child.on("error", (err) => {
+    let exitCode: number | null = null;
+    let settled = false;
+    let graceTimer: NodeJS.Timeout | undefined;
+
+    const settle = () => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
+      resolve({ exitCode, timedOut, stdout, stderr });
+    };
+
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
       reject(err);
     });
 
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ exitCode: code, timedOut, stdout, stderr });
+    // 'close' waits for stdio EOF; a grandchild inheriting stdout can hold the
+    // pipe open indefinitely, so also resolve after a grace window post-'exit'.
+    child.on("exit", (code) => {
+      exitCode = code;
+      graceTimer = setTimeout(() => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        settle();
+      }, opts.streamGraceMs ?? 5000);
     });
 
+    child.on("close", settle);
+
+    // EPIPE from a fast-exiting child is expected; the outcome is captured by the exit code
+    child.stdin.on("error", () => {});
     if (opts.stdin !== undefined) {
       child.stdin.write(opts.stdin);
     }

@@ -44,6 +44,35 @@ describe("runCommand", () => {
     expect(result.stderr).toContain("boom");
   });
 
+  it("does not crash when the child exits before consuming stdin", async () => {
+    const result = await runCommand({
+      cmd: process.execPath,
+      args: ["-e", "process.exit(7)"],
+      stdin: "x".repeat(1024 * 1024),
+      cwd: process.cwd(),
+      env: nodeEnv,
+      timeoutMs: 10_000,
+    });
+    expect(result.exitCode).toBe(7);
+  });
+
+  it("resolves shortly after exit even when a grandchild holds stdout open", async () => {
+    const start = Date.now();
+    const result = await runCommand({
+      cmd: process.execPath,
+      // .unref() lets the intermediate node process exit immediately; the sleep
+      // grandchild inherits (and holds open) its stdout pipe, so 'close' never fires.
+      args: ["-e", `require("child_process").spawn("sleep", ["30"], { stdio: "inherit" }).unref(); console.log("parent done");`],
+      cwd: process.cwd(),
+      env: nodeEnv,
+      timeoutMs: 20_000,
+      streamGraceMs: 1_000,
+    });
+    expect(result.stdout).toContain("parent done");
+    expect(result.exitCode).toBe(0);
+    expect(Date.now() - start).toBeLessThan(10_000);
+  });
+
   it("kills the child and flags timedOut on timeout", async () => {
     const start = Date.now();
     const result = await runCommand({
