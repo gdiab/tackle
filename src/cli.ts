@@ -4,39 +4,153 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { Command, InvalidArgumentError, Option } from "commander";
 import { CodexAdapter } from "./adapter/codex/index.js";
-import type { Adapter } from "./adapter/types.js";
+import type { Adapter, Effort } from "./adapter/types.js";
+import { runPhase } from "./workflow/phase.js";
+import type { Presenter } from "./workflow/presenter.js";
+import { TerminalPresenter } from "./workflow/presenter.js";
+import { readWorkflowState } from "./workflow/state.js";
+import { PHASE_ORDER, SPINE } from "./workflow/spine.js";
+import type { PhaseName } from "./workflow/types.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
 
-export function buildProgram(opts: { adapter?: Adapter; writeOut?: (s: string) => void } = {}): Command {
+function parseTimeout(v: string): number {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) throw new InvalidArgumentError("timeout must be a positive number");
+  return n;
+}
+
+function withTurnOptions(cmd: Command): Command {
+  return cmd
+    .option("--cwd <dir>", "working directory (a git repo)", process.cwd())
+    .addOption(new Option("--effort <band>", "effort band").choices(["low", "medium", "high"]).default("medium"))
+    .option("--model <model>", "model override (default: backend default)")
+    .option("--timeout <seconds>", "turn timeout in seconds", parseTimeout);
+}
+
+interface PhaseCliOptions {
+  cwd: string;
+  effort: Effort;
+  model?: string;
+  timeout?: number;
+  fresh?: boolean;
+  redo?: boolean;
+  skipSpecs?: boolean;
+  trivial?: boolean;
+}
+
+export function buildProgram(
+  opts: { adapter?: Adapter; presenter?: Presenter; writeOut?: (s: string) => void } = {},
+): Command {
   const writeOut = opts.writeOut ?? ((s: string) => process.stdout.write(s));
   const program = new Command();
   program.name("tackle").description("Bespoke agentic dev harness").version(pkg.version);
 
+  withTurnOptions(
+    program
+      .command("turn")
+      .description("Run a single turn through an adapter and print the TurnResult")
+      .argument("<prompt>", "the prompt for the turn"),
+  ).action(async (prompt: string, options: PhaseCliOptions) => {
+    const adapter = opts.adapter ?? new CodexAdapter();
+    const result = await adapter.run({
+      prompt,
+      workdir: options.cwd,
+      effort: options.effort,
+      model: options.model,
+      timeoutMs: options.timeout === undefined ? undefined : options.timeout * 1000,
+    });
+    writeOut(JSON.stringify(result, null, 2) + "\n");
+    if (result.status !== "completed") process.exitCode = 1;
+  });
+
+  async function executePhase(
+    phase: PhaseName,
+    request: string | undefined,
+    options: PhaseCliOptions,
+  ): Promise<void> {
+    const enteringHere =
+      phase === "specs" || options.skipSpecs === true || options.trivial === true;
+    if (enteringHere && phase !== "specs" && request === undefined) {
+      throw new InvalidArgumentError(`starting a workflow at ${phase} requires a request argument`);
+    }
+    const adapter = opts.adapter ?? new CodexAdapter();
+    const presenter = opts.presenter ?? new TerminalPresenter();
+    const outcome = await runPhase({
+      phase,
+      workdir: options.cwd,
+      adapter,
+      presenter,
+      canEnter: enteringHere,
+      ...(request === undefined ? {} : { request }),
+      ...(options.fresh === undefined ? {} : { fresh: options.fresh }),
+      ...(options.redo === undefined ? {} : { redo: options.redo }),
+      effort: options.effort,
+      ...(options.model === undefined ? {} : { model: options.model }),
+      ...(options.timeout === undefined ? {} : { timeoutMs: options.timeout * 1000 }),
+    });
+    if (outcome !== "approved") process.exitCode = 1;
+  }
+
+  withTurnOptions(
+    program
+      .command("specs")
+      .description("Write .tackle/specs.md from a request (workflow entry)")
+      .argument("<request>", "what to build"),
+  )
+    .option("--fresh", "discard any in-progress workflow and start over")
+    .option("--redo", "re-run this phase even if it already has an artifact")
+    .action(async (request: string, options: PhaseCliOptions) => executePhase("specs", request, options));
+
+  withTurnOptions(
+    program
+      .command("plan")
+      .description("Write .tackle/plan.md from the approved specs")
+      .argument("[request]", "amended or entry request"),
+  )
+    .option("--skip-specs", "start the workflow at plan (bug fixes)")
+    .option("--fresh", "with --skip-specs: discard any in-progress workflow and start over")
+    .option("--redo", "re-run this phase even if it already has an artifact")
+    .action(async (request: string | undefined, options: PhaseCliOptions) =>
+      executePhase("plan", request, options),
+    );
+
+  withTurnOptions(
+    program
+      .command("build")
+      .description("Implement the approved plan; freeze the diff to .tackle/build.diff")
+      .argument("[request]", "amended or entry request"),
+  )
+    .option("--trivial", "start the workflow at build (trivial changes)")
+    .option("--fresh", "with --trivial: discard any in-progress workflow and start over")
+    .option("--redo", "re-run this phase even if it already has an artifact")
+    .action(async (request: string | undefined, options: PhaseCliOptions) =>
+      executePhase("build", request, options),
+    );
+
+  withTurnOptions(
+    program.command("pr").description("Write the PR body to .tackle/pr.md from the build artifacts"),
+  )
+    .option("--redo", "re-run this phase even if it already has an artifact")
+    .action(async (options: PhaseCliOptions) => executePhase("pr", undefined, options));
+
   program
-    .command("turn")
-    .description("Run a single turn through an adapter and print the TurnResult")
-    .argument("<prompt>", "the prompt for the turn")
+    .command("status")
+    .description("Show the workflow state")
     .option("--cwd <dir>", "working directory (a git repo)", process.cwd())
-    .addOption(new Option("--effort <band>", "effort band").choices(["low", "medium", "high"]).default("medium"))
-    .option("--model <model>", "model override (default: backend default)")
-    .option("--timeout <seconds>", "turn timeout in seconds", (v) => {
-      const n = Number(v);
-      if (!Number.isFinite(n) || n <= 0) throw new InvalidArgumentError("timeout must be a positive number");
-      return n;
-    })
-    .action(async (prompt: string, options: { cwd: string; effort: "low" | "medium" | "high"; model?: string; timeout?: number }) => {
-      const adapter = opts.adapter ?? new CodexAdapter();
-      const result = await adapter.run({
-        prompt,
-        workdir: options.cwd,
-        effort: options.effort,
-        model: options.model,
-        timeoutMs: options.timeout === undefined ? undefined : options.timeout * 1000,
-      });
-      writeOut(JSON.stringify(result, null, 2) + "\n");
-      if (result.status !== "completed") process.exitCode = 1;
+    .action(async (options: { cwd: string }) => {
+      const state = await readWorkflowState(options.cwd);
+      if (state === null) {
+        writeOut("no workflow in progress\n");
+        return;
+      }
+      writeOut(`request: ${state.request}\nentry: ${state.entry}\n`);
+      for (const phase of PHASE_ORDER) {
+        if (PHASE_ORDER.indexOf(phase) < PHASE_ORDER.indexOf(state.entry)) continue;
+        const status = state.phases[phase]?.status ?? "pending";
+        writeOut(`${phase.padEnd(6)} ${status.padEnd(20)} ${SPINE[phase].artifact}\n`);
+      }
     });
 
   return program;
