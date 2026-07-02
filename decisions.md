@@ -13,3 +13,13 @@ Spike: [docs/spikes/2026-07-02-sandcastle.md](docs/spikes/2026-07-02-sandcastle.
 ## D-003 · 2026-07-02 · Issue tracking in beads (`bd`), not markdown todo files
 
 Dependency-aware, `bd ready` surfaces unblocked work, prefix `tackle-`. **Rejected:** `tasks/todo.md` (no dependency model, no agent-claimable queue).
+
+## D-004 · 2026-07-02 · Human gate is the phase command's own blocking prompt, re-presented on resume
+
+The approval prompt fires at the end of each phase command; a declined or orphaned
+gate is re-presented by the next phase command before it proceeds, which is also the
+crash-resume path (resume-from-artifacts needs no extra machinery). Only `approved`
+exits 0, so `tackle plan && tackle build` chains safely. **Rejected:** a separate
+`tackle approve` command (a second command per phase in the common path, and two
+sources of truth for gate state); auto-approve on artifact-exists (violates
+attended-first).
