@@ -69,6 +69,15 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
   const { presenter, workdir } = opts;
   let state = await readWorkflowState(workdir);
 
+  // -- fresh guard: must have an entry-capable invocation --------------------
+  if (state !== null && opts.fresh === true && !opts.canEnter) {
+    presenter.inform(
+      `--fresh starts a new workflow, so it needs an entry-capable invocation ` +
+        `(\`tackle specs\`, \`tackle plan --skip-specs\`, or \`tackle build --trivial\`)`,
+    );
+    return "halted";
+  }
+
   // -- workflow start / reset -------------------------------------------------
   if (state === null || (opts.fresh === true && opts.canEnter)) {
     if (!opts.canEnter) {

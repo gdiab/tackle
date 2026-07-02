@@ -191,4 +191,19 @@ describe("entry, resume, and invalidation", () => {
     expect(outcome).toBe("approved");
     expect(adapter.prompts).toHaveLength(1);
   });
+
+  it("halts when --fresh is passed without an entry-capable invocation", async () => {
+    const dir = await tempWorkdir();
+    await runPhase({
+      phase: "specs", workdir: dir,
+      adapter: scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs")]),
+      presenter: approveAll, canEnter: true, request: "r",
+    });
+    const prAdapter = scriptedAdapter([writesArtifact(".tackle/pr.md", "# pr")]);
+    const outcome = await runPhase({
+      phase: "pr", workdir: dir, adapter: prAdapter, presenter: approveAll, canEnter: false, fresh: true,
+    });
+    expect(outcome).toBe("halted");
+    expect(prAdapter.prompts).toHaveLength(0);
+  });
 });
