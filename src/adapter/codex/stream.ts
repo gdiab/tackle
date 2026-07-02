@@ -30,11 +30,17 @@ export function parseStreamLine(line: string): CodexEvent | null {
   } catch {
     return null; // codex mixes human-readable notices into stdout
   }
+  if (typeof parsed !== "object" || parsed === null) return null;
   const event = parsed as {
     type?: string;
     thread_id?: string;
     item?: { type?: string; text?: string };
-    usage?: Parameters<typeof normalizeUsage>[0];
+    usage?: {
+      input_tokens?: unknown;
+      cached_input_tokens?: number;
+      output_tokens?: unknown;
+      reasoning_output_tokens?: number;
+    };
     error?: { message?: string };
   };
 
@@ -45,8 +51,20 @@ export function parseStreamLine(line: string): CodexEvent | null {
       return event.item?.type === "agent_message" && typeof event.item.text === "string"
         ? { kind: "message", text: event.item.text }
         : { kind: "other", raw: parsed };
-    case "turn.completed":
-      return event.usage ? { kind: "usage", usage: normalizeUsage(event.usage) } : { kind: "other", raw: parsed };
+    case "turn.completed": {
+      const usage = event.usage;
+      return usage && typeof usage.input_tokens === "number" && typeof usage.output_tokens === "number"
+        ? {
+            kind: "usage",
+            usage: normalizeUsage({
+              input_tokens: usage.input_tokens,
+              cached_input_tokens: usage.cached_input_tokens,
+              output_tokens: usage.output_tokens,
+              reasoning_output_tokens: usage.reasoning_output_tokens,
+            }),
+          }
+        : { kind: "other", raw: parsed };
+    }
     case "turn.failed":
       return { kind: "error", message: event.error?.message ?? "turn failed" };
     default:

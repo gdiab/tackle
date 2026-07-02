@@ -49,6 +49,26 @@ describe("parseStreamLine", () => {
     expect(parseStreamLine("")).toBeNull();
     expect(parseStreamLine("Reading additional input from stdin...")).toBeNull();
   });
+
+  it("returns null for a bare JSON null line", () => {
+    expect(parseStreamLine("null")).toBeNull();
+  });
+
+  it("returns null for JSON scalars", () => {
+    expect(parseStreamLine("42")).toBeNull();
+    expect(parseStreamLine('"hello"')).toBeNull();
+  });
+
+  it("classifies a JSON array as other, without throwing", () => {
+    expect(parseStreamLine("[1,2]")).toEqual({ kind: "other", raw: [1, 2] });
+  });
+
+  it("classifies turn.completed with malformed usage as other (no NaN)", () => {
+    expect(parseStreamLine('{"type":"turn.completed","usage":{"foo":1}}')).toEqual({
+      kind: "other",
+      raw: { type: "turn.completed", usage: { foo: 1 } },
+    });
+  });
 });
 
 describe("normalizeUsage", () => {
