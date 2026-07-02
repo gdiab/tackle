@@ -1,0 +1,15 @@
+#!/usr/bin/env node
+// Fake codex CLI: consumes stdin, replays a fixture, exits per $HOME/.fake-codex.json knobs.
+const fs = require("node:fs");
+const path = require("node:path");
+
+let knobs = {};
+try {
+  knobs = JSON.parse(fs.readFileSync(path.join(process.env.HOME, ".fake-codex.json"), "utf8"));
+} catch {}
+
+process.stdin.on("data", () => {});
+process.stdin.on("end", () => {
+  if (knobs.fixture) process.stdout.write(fs.readFileSync(knobs.fixture, "utf8"));
+  setTimeout(() => process.exit(knobs.exitCode ?? 0), knobs.sleepMs ?? 0);
+});
