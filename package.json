@@ -1,0 +1,24 @@
+{
+  "name": "tackle-harness",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "bin": { "tackle": "./dist/cli.js" },
+  "engines": { "node": ">=22" },
+  "packageManager": "pnpm@10.16.1",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "tsx": "^4.22.5",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

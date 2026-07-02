@@ -3,3 +3,7 @@
 .dolt/
 *.db
 .beads-credential-key
+.superpowers/
+node_modules/
+dist/
+.tackle/
