@@ -2,6 +2,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { TurnRequest } from "../src/adapter/types.js";
 import { runReviewPhase } from "../src/workflow/review.js";
 import { sha256 } from "../src/workflow/hash.js";
 import {
@@ -159,6 +160,8 @@ describe("runReviewPhase: clean path and commit chain", () => {
   it("blocking findings escalate to the gate; approval still commits (integrity, not cleanliness)", async () => {
     const dir = await tempGitRepo();
     const diff = await seedApprovedBuild(dir);
+    // zero fix-turn budget: escalates straight to the gate off round 1, author untouched
+    await writeFile(join(dir, ".tackle", "config.json"), JSON.stringify({ reviewLoopIterations: 0 }));
     const outcome = await runReviewPhase({
       workdir: dir, reviewer: reviewerSaying(FINDINGS, diff), author: unusedAuthor(), presenter: approveAll,
     });
@@ -203,5 +206,124 @@ describe("runReviewPhase: clean path and commit chain", () => {
     const outcome = await runReviewPhase({ workdir: dir, reviewer: scriptedAdapter([async () => fakeTurn()]), author: unusedAuthor(), presenter });
     expect(outcome).toBe("halted");
     expect(presenter.messages.join("\n")).toContain("refusing to commit");
+  });
+});
+
+describe("runReviewPhase: fix loop", () => {
+  const FINDINGS_A =
+    'a\n\n```json\n{ "verdict": "findings", "findings": [{ "severity": "blocking", "file": "w.ts", "summary": "issue A" }] }\n```\n';
+  const FINDINGS_B =
+    'b\n\n```json\n{ "verdict": "findings", "findings": [{ "severity": "blocking", "file": "w.ts", "summary": "issue B" }] }\n```\n';
+
+  /** Author fake that "fixes" by changing the tree, returning the new real diff. */
+  function fixingAuthor(newContent: string) {
+    return scriptedAdapter([
+      async (req) => {
+        await writeFile(join(req.workdir, "w.ts"), newContent);
+        const { captureWorkdirDiff, resolveHead } = await import("../src/adapter/diff.js");
+        return fakeTurn({ summary: "fixed it", workdirDiff: await captureWorkdirDiff(req.workdir, await resolveHead(req.workdir)) });
+      },
+    ]);
+  }
+
+  /** Reviewer that must recompute the live diff per round (post-fix rounds see a new tree). */
+  function liveReviewer(summaries: string[]) {
+    return scriptedAdapter(
+      summaries.map((summary) => async (req: TurnRequest) => {
+        const { captureWorkdirDiff, resolveHead } = await import("../src/adapter/diff.js");
+        return fakeTurn({ summary, workdirDiff: await captureWorkdirDiff(req.workdir, await resolveHead(req.workdir)) });
+      }),
+    );
+  }
+
+  it("findings -> fix -> clean -> commit; review.md records both rounds; diff custody updates", async () => {
+    const dir = await tempGitRepo();
+    await seedApprovedBuild(dir);
+    const reviewer = liveReviewer([FINDINGS_A, CLEAN]);
+    const author = fixingAuthor("export const w = 2; // fixed\n");
+    const outcome = await runReviewPhase({ workdir: dir, reviewer, author, presenter: approveAll });
+    expect(outcome).toBe("approved");
+    const md = await readFile(join(dir, ".tackle", "review.md"), "utf8");
+    expect(md).toContain("Round 1");
+    expect(md).toContain("Round 2");
+    expect(md).toContain("issue A");
+    // the committed content is the FIXED version
+    const { git } = await import("../src/adapter/diff.js");
+    expect(await git(dir, ["show", "HEAD:w.ts"])).toContain("fixed");
+    // second reviewer prompt contained the re-frozen diff
+    expect(reviewer.prompts[1]).toContain("fixed");
+    // custody: build.diffHash matches the final frozen diff
+    const state = await readState(dir);
+    const frozen = await readFile(join(dir, ".tackle", "build.diff"), "utf8");
+    expect(state.phases.build.diffHash).toBe(sha256(frozen));
+  });
+
+  it("escalates when the fix budget is exhausted", async () => {
+    const dir = await tempGitRepo();
+    await seedApprovedBuild(dir);
+    // default reviewLoopIterations = 2: rounds go A, B, A -> the circuit breaker
+    // never trips (no two consecutive rounds identical) but 2 fixes are spent -> escalate
+    const reviewer = liveReviewer([FINDINGS_A, FINDINGS_B, FINDINGS_A]);
+    const author = fixingAuthor("export const w = 2;\n");
+    const presenter = capturingPresenter(false); // human rejects the escalation
+    const outcome = await runReviewPhase({ workdir: dir, reviewer, author, presenter });
+    expect(outcome).toBe("rejected");
+    expect(reviewer.prompts.length).toBe(3);
+    const md = await readFile(join(dir, ".tackle", "review.md"), "utf8");
+    expect(md).toContain("Escalated");
+  });
+
+  it("circuit-breaks on identical findings two rounds running (no progress)", async () => {
+    const dir = await tempGitRepo();
+    await seedApprovedBuild(dir);
+    const reviewer = liveReviewer([FINDINGS_A, FINDINGS_A, FINDINGS_A]);
+    const author = fixingAuthor("export const w = 9;\n");
+    const presenter = capturingPresenter(false);
+    const outcome = await runReviewPhase({ workdir: dir, reviewer, author, presenter });
+    expect(outcome).toBe("rejected");
+    // identical A twice consecutively trips threshold 2 after ONE fix, not two
+    expect(reviewer.prompts.length).toBe(2);
+    expect(presenter.messages.concat().join("\n") + (await readFile(join(dir, ".tackle", "review.md"), "utf8"))).toContain("no progress");
+  });
+
+  it("halts when a fix turn fails or bills metered", async () => {
+    const dir = await tempGitRepo();
+    await seedApprovedBuild(dir);
+    const reviewer = liveReviewer([FINDINGS_A]);
+    const author = scriptedAdapter([
+      async () => fakeTurn({ status: "tool_error", summary: "" }),
+      async () => fakeTurn({ status: "tool_error", summary: "" }),
+    ]);
+    const outcome = await runReviewPhase({ workdir: dir, reviewer, author, presenter: capturingPresenter(true) });
+    expect(outcome).toBe("halted");
+  });
+
+  it("resumed escalation gate preserves the original detail (gateDetail)", async () => {
+    const dir = await tempGitRepo();
+    await seedApprovedBuild(dir);
+    // identical findings two rounds running trips the circuit breaker after one fix turn
+    const reviewer = liveReviewer([FINDINGS_A, FINDINGS_A]);
+    const author = fixingAuthor("export const w = 2;\n");
+    const outcome = await runReviewPhase({ workdir: dir, reviewer, author, presenter: capturingPresenter(false) });
+    expect(outcome).toBe("rejected");
+    const state = await readState(dir);
+    expect(state.phases.review.gateDetail).toContain("unresolved blocking");
+
+    let recordedDetail: string | undefined;
+    const recordingPresenter = {
+      askApproval: async (req: { detail?: string }) => {
+        recordedDetail = req.detail;
+        return true;
+      },
+      inform: () => {},
+    };
+    const throwingReviewer = scriptedAdapter([
+      async () => {
+        throw new Error("must not run a turn on resume");
+      },
+    ]);
+    const outcome2 = await runReviewPhase({ workdir: dir, reviewer: throwingReviewer, author, presenter: recordingPresenter });
+    expect(outcome2).toBe("approved");
+    expect(recordedDetail).toContain("unresolved blocking");
   });
 });

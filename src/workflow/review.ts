@@ -7,11 +7,11 @@ import { sha256 } from "./hash.js";
 import type { PhaseOutcome } from "./phase.js";
 import { presentGate, toTurnRecord } from "./phase.js";
 import type { Presenter } from "./presenter.js";
-import { buildReviewPrompt } from "./prompts.js";
+import { buildFixPrompt, buildReviewPrompt } from "./prompts.js";
 import { BUILD_DIFF_FILE, SPINE } from "./spine.js";
 import { loadPolicyConfig, readWorkflowState, writeWorkflowState } from "./state.js";
 import type { PolicyConfig, WorkflowState } from "./types.js";
-import type { Verdict } from "./verdict.js";
+import type { Finding, Verdict } from "./verdict.js";
 import { blockingFindings, parseVerdict } from "./verdict.js";
 
 export interface RunReviewOptions {
@@ -115,7 +115,11 @@ async function commitReviewed(
   const porcelain = await git(workdir, ["status", "--porcelain"]);
   const unstaged = porcelain
     .split("\n")
-    .filter((l) => l.length > 0 && !l.slice(3).startsWith(".tackle"))
+    .filter((l) => {
+      if (l.length === 0) return false;
+      const p = l.slice(3);
+      return !(p === ".tackle" || p.startsWith(".tackle/"));
+    })
     .filter((l) => l[1] !== " ");
   if (unstaged.length > 0) {
     return haltReview(
@@ -182,7 +186,7 @@ export async function runReviewPhase(opts: RunReviewOptions): Promise<PhaseOutco
       return "approved";
     }
     if (own.status === "awaiting_approval") {
-      return presentReviewGateAndCommit(workdir, state, presenter);
+      return presentReviewGateAndCommit(workdir, state, presenter, own.gateDetail);
     }
     // halted: fall through and re-run
   }
@@ -269,31 +273,106 @@ interface LoopContext extends RunReviewOptions {
   initialDiff: string;
 }
 
-/** Task 7 scope: one review round; blocking findings escalate straight to the gate. */
 async function reviewLoop(ctx: LoopContext): Promise<PhaseOutcome> {
-  const { presenter, state, workdir } = ctx;
+  const { presenter, policy, state, workdir } = ctx;
   const rounds: RoundRecord[] = [];
-  const currentDiff = ctx.initialDiff;
+  let currentDiff = ctx.initialDiff;
+  let fixesDone = 0;
+  let previousBlockingKey: string | null = null;
+  let identicalStreak = 0;
 
-  const reviewed = await runReviewerTurn(ctx, currentDiff, rounds.length + 1);
-  if ("halt" in reviewed) return reviewed.halt;
-  const { result, verdict } = reviewed;
-  rounds.push({ round: rounds.length + 1, verdict });
+  for (;;) {
+    const round = rounds.length + 1;
+    const reviewed = await runReviewerTurn(ctx, currentDiff, round);
+    if ("halt" in reviewed) return reviewed.halt;
+    const { result, verdict } = reviewed;
+    rounds.push({ round, verdict });
 
-  const blocking = blockingFindings(verdict);
-  const escalation =
-    blocking.length === 0
-      ? undefined
-      : `${blocking.length} unresolved blocking finding(s); approving commits anyway, rejecting discards the review.`;
-  await writeFile(join(workdir, SPINE.review.artifact), renderReviewMd(rounds, escalation));
+    const blocking = blockingFindings(verdict);
 
-  state.phases.review = {
-    status: "awaiting_approval",
-    lastTurn: toTurnRecord(result),
-    reviewedDiffHash: sha256(currentDiff),
+    const finish = async (escalation?: string): Promise<PhaseOutcome> => {
+      await writeFile(join(workdir, SPINE.review.artifact), renderReviewMd(rounds, escalation));
+      state.phases.review = {
+        status: "awaiting_approval",
+        lastTurn: toTurnRecord(result),
+        reviewedDiffHash: sha256(currentDiff),
+        ...(escalation === undefined ? {} : { gateDetail: escalation }),
+      };
+      await writeWorkflowState(workdir, state);
+      return presentReviewGateAndCommit(workdir, state, presenter, escalation);
+    };
+
+    if (blocking.length === 0) return finish();
+
+    // circuit breaker: identical blocking findings N rounds running = no progress
+    const key = JSON.stringify(blocking);
+    identicalStreak = key === previousBlockingKey ? identicalStreak + 1 : 1;
+    previousBlockingKey = key;
+    if (identicalStreak >= policy.circuitBreakerThreshold) {
+      return finish(
+        `review made no progress (identical findings ${identicalStreak} rounds running); ` +
+          `${blocking.length} unresolved blocking finding(s); approving commits anyway, rejecting discards the review.`,
+      );
+    }
+    if (fixesDone >= policy.reviewLoopIterations) {
+      return finish(
+        `review loop budget exhausted (${policy.reviewLoopIterations} fix turns); ` +
+          `${blocking.length} unresolved blocking finding(s); approving commits anyway, rejecting discards the review.`,
+      );
+    }
+
+    // -- fix turn (author adapter), then re-freeze the diff -----------------------
+    const fix = await runFixTurn(ctx, blocking);
+    if ("halt" in fix) return fix.halt;
+    fixesDone += 1;
+    rounds[rounds.length - 1] = { round, verdict, fixSummary: fix.result.summary };
+    currentDiff = fix.result.workdirDiff;
+    if (currentDiff.length === 0) presenter.inform("warning: fix turn produced an empty diff");
+    await writeFile(join(workdir, BUILD_DIFF_FILE), currentDiff);
+    // custody pin: build.diffHash always names the currently frozen diff, so a
+    // killed loop can resume (design refinement in the plan header)
+    const buildState = state.phases.build;
+    if (buildState !== undefined) buildState.diffHash = sha256(currentDiff);
+    await writeWorkflowState(workdir, state);
+  }
+}
+
+/** One author fix turn under the deterministic-retry policy, with the billing gate. */
+async function runFixTurn(
+  ctx: LoopContext,
+  findings: Finding[],
+): Promise<{ result: TurnResult } | { halt: PhaseOutcome }> {
+  const { presenter, policy, state, workdir } = ctx;
+  let lastTurn: TurnResult | null = null;
+  let retryNote: string | undefined;
+  for (let attempt = 0; attempt <= policy.deterministicRetries; attempt++) {
+    const prompt =
+      buildFixPrompt({ findings, request: state.request }) +
+      (retryNote === undefined ? "" : `\n\n## Previous attempt\n\n${retryNote}`);
+    const result = await ctx.author.run({
+      prompt,
+      workdir,
+      effort: ctx.effort ?? "medium",
+      ...(ctx.timeoutMs === undefined ? {} : { timeoutMs: ctx.timeoutMs }),
+    });
+    lastTurn = result;
+    const billingHalt = billingHaltMessage(result.usage.billingType);
+    if (billingHalt !== null) return { halt: await haltReview(workdir, state, result, presenter, billingHalt) };
+    if (result.status !== "completed") {
+      retryNote = `The previous attempt ended with status "${result.status}" before finishing. Start over.`;
+      continue;
+    }
+    return { result };
+  }
+  return {
+    halt: await haltReview(
+      workdir,
+      state,
+      lastTurn,
+      presenter,
+      `fix turn failed after ${policy.deterministicRetries + 1} attempt(s); needs a human decision`,
+    ),
   };
-  await writeWorkflowState(workdir, state);
-  return presentReviewGateAndCommit(workdir, state, presenter, escalation);
 }
 
 /** One reviewer turn under the deterministic-retry policy, with purity + billing + verdict gates. */

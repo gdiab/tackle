@@ -26,6 +26,8 @@ export interface PhaseState {
   reviewedDiffHash?: string;
   /** review only: the commit created on review approval. */
   commitSha?: string;
+  /** review only: the escalation detail from the fix loop, re-surfaced when a pending gate is resumed. */
+  gateDetail?: string;
 }
 
 export interface WorkflowState {
