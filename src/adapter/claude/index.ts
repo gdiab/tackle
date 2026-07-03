@@ -25,7 +25,9 @@ export class ClaudeAdapter implements Adapter {
   }
 
   async run(req: TurnRequest): Promise<TurnResult> {
-    const env = buildAdapterEnv({ base: this.baseEnv, allow: ["PATH", "HOME"] });
+    // USER is required on macOS: claude resolves its Keychain credentials from it
+    // (without it the CLI reports "Not logged in"). Verified by live bisect.
+    const env = buildAdapterEnv({ base: this.baseEnv, allow: ["PATH", "HOME", "USER"] });
     const home = env.HOME ?? homedir();
     const billingType = await detectBillingType({
       env,

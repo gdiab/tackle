@@ -27,10 +27,10 @@ function makeEnv(knobs: {
   promptFile?: string;
   writeFile?: { path: string; content: string };
   sleepMs?: number;
-}): { PATH: string; HOME: string } {
+}): { PATH: string; HOME: string; USER: string } {
   const home = mkdtempSync(join(tmpdir(), "tackle-home-"));
   writeFileSync(join(home, ".fake-claude.json"), JSON.stringify(knobs));
-  return { PATH: `${fakesDir}:${process.env.PATH}`, HOME: home };
+  return { PATH: `${fakesDir}:${process.env.PATH}`, HOME: home, USER: "testuser" };
 }
 
 describe("ClaudeAdapter", () => {
