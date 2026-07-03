@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPhasePrompt } from "../src/workflow/prompts.js";
+import { buildFixPrompt, buildPhasePrompt, buildReviewPrompt } from "../src/workflow/prompts.js";
 import { PHASE_ORDER, SPINE } from "../src/workflow/spine.js";
 
 describe("buildPhasePrompt", () => {
@@ -54,5 +54,27 @@ describe("buildPhasePrompt", () => {
   it("build prompt forbids committing; pr prompt allows inspecting the repo", () => {
     expect(buildPhasePrompt({ def: SPINE.build, request: "r", inputs: [] })).toContain("Do not commit");
     expect(buildPhasePrompt({ def: SPINE.pr, request: "r", inputs: [] })).toContain("git diff");
+  });
+});
+
+describe("review prompts", () => {
+  it("inlines the diff and requirement, demands the verdict block, forbids writes", () => {
+    const p = buildReviewPrompt({ diff: "+added line", requirement: { label: "specs (.tackle/specs.md)", content: "must render" } });
+    expect(p).toContain("+added line");
+    expect(p).toContain("must render");
+    expect(p).toContain('"verdict"');
+    expect(p).toContain("Do not modify any files");
+    expect(p).toContain("simplifications"); // structural posture
+  });
+
+  it("fix prompt lists findings and forbids committing", () => {
+    const p = buildFixPrompt({
+      findings: [{ severity: "blocking", file: "src/a.ts", line: 3, summary: "off by one", detail: "loop bound" }],
+      request: "add widget",
+    });
+    expect(p).toContain("src/a.ts:3");
+    expect(p).toContain("off by one");
+    expect(p).toContain("Do not commit");
+    expect(p).toContain("add widget");
   });
 });
