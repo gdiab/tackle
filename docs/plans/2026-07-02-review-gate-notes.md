@@ -54,22 +54,39 @@ deliberate leniency for real LLM output; required fields stay strict.
   between review and commit; refusing to commit"**, review halted. The
   bdfinst `.review-passed` mechanism verified end to end against real tools.
 
-## Deferred minors (final whole-branch review triages)
+## Final whole-branch review (fable) — outcome
 
-- Resume path can approve a phase whose artifact was deleted while
-  `awaiting_approval`, recording no pin (pre-existing fail-open window for
-  hash-less states; presentGate skips pinning on null).
+Two blockers found and fixed in 3b872c8, both with adversarial regression
+tests that failed before the fix:
+
+1. `presentGate` could approve a phase whose artifact was deleted while
+   `awaiting_approval`, recording no pin — now refuses before presenting
+   (also closes a TOCTOU: the pin is taken from the same pre-gate read the
+   human approves).
+2. The chain commit executed repo git hooks — turn-writable `.git/hooks/`
+   could mutate the index after the hash check. Commits now run with
+   `core.hooksPath=/dev/null` + `--no-verify`; `.git/` is named in the
+   design doc's accepted-limitation text.
+
+Also pinned in the same commit: USER env passthrough (a revert now fails a
+test), the fix-turn metered-billing halt, and the drifted billing-halt copy
+aligned between phase.ts and review.ts. Design doc reconciled (structural
+proof wording, custody refinement, verdict optional-field leniency).
+
+## Deferred minors (recorded, non-blocking)
+
+- Reviewer read-isolation is a tool disallow-LIST (fragile to new CLI tools);
+  writes have the purity-check backstop, reads don't. Allowlist when the CLI
+  supports it.
+- `tackle review --redo` after a landed commit drops `commitSha` from state
+  and halts with a misleading drift message (safe, but the UX lies); untested.
 - Fix prompt hands the author `state.request` while the reviewer sees the
-  specs-preferred requirement (design choice; reconcile or document).
+  specs-preferred requirement (documented asymmetry; findings carry the
+  specifics).
 - Three near-identical scripted-clean-reviewer fakes across test files.
-- Design wording "staged diff must also hash to sha256(D)" is implemented as
-  the porcelain-clean structural proof after `git add -A` (equivalent; the
-  design text could say so).
 - `vitest.config.ts` testTimeout 15s→30s masks CPU-contention flakiness whose
   root cause is `test/exec.test.ts`'s unref'd `sleep 30` grandchildren — a
   bounded-sleep or pool-concurrency fix is the elegant version.
-- Spec wording for verdict validation ("any malformed finding entry") diverges
-  from the adjudicated optional-field leniency; reconcile the design doc.
 
 ## Environment facts pinned along the way
 
