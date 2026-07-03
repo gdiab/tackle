@@ -18,6 +18,10 @@ export interface TurnRecord {
 export interface PhaseState {
   status: PhaseStatus;
   lastTurn?: TurnRecord;
+  /** sha256 of the artifact file, pinned at approval time (SPEC artifact integrity). */
+  artifactHash?: string;
+  /** build only: sha256 of the currently frozen .tackle/build.diff (see design refinement). */
+  diffHash?: string;
 }
 
 export interface WorkflowState {

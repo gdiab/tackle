@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Adapter, Effort, TurnResult } from "../adapter/types.js";
 import { readArtifact, removeArtifact } from "./artifacts.js";
+import { sha256 } from "./hash.js";
 import type { Presenter } from "./presenter.js";
 import { buildPhasePrompt } from "./prompts.js";
 import { BUILD_DIFF_FILE, effectivePredecessor, PHASE_ORDER, SPINE } from "./spine.js";
@@ -27,7 +28,7 @@ export interface RunPhaseOptions {
   timeoutMs?: number;
 }
 
-function toTurnRecord(result: TurnResult): TurnRecord {
+export function toTurnRecord(result: TurnResult): TurnRecord {
   return {
     status: result.status,
     summary: result.summary,
@@ -43,7 +44,7 @@ function toTurnRecord(result: TurnResult): TurnRecord {
  * Serves both the end-of-phase gate and resume: a pending gate from an earlier
  * (possibly killed) run is re-presented by the next command that needs it.
  */
-async function presentGate(
+export async function presentGate(
   phase: PhaseName,
   state: WorkflowState,
   opts: Pick<RunPhaseOptions, "workdir" | "presenter">,
@@ -59,6 +60,14 @@ async function presentGate(
   });
   if (approved) {
     phaseState.status = "approved";
+    // Pin what was approved: later consumers verify against these hashes so a
+    // subsequent turn cannot silently rewrite an already-approved artifact.
+    const artifact = await readArtifact(opts.workdir, def.artifact);
+    if (artifact !== null) phaseState.artifactHash = sha256(artifact);
+    if (phase === "build") {
+      const diff = await readArtifact(opts.workdir, BUILD_DIFF_FILE);
+      if (diff !== null) phaseState.diffHash = sha256(diff);
+    }
     await writeWorkflowState(opts.workdir, state);
   }
   return approved;
@@ -180,7 +189,16 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
   for (const inputPhase of def.inputs) {
     // Missing inputs are phases skipped by the entry point, not errors.
     const content = await readArtifact(workdir, SPINE[inputPhase].artifact);
-    if (content !== null) inputs.push({ name: inputPhase, path: SPINE[inputPhase].artifact, content });
+    if (content === null) continue;
+    const pinned = state.phases[inputPhase]?.artifactHash;
+    if (pinned !== undefined && sha256(content) !== pinned) {
+      presenter.inform(
+        `${SPINE[inputPhase].artifact} changed after ${inputPhase} was approved; ` +
+          `re-run \`tackle ${inputPhase} --redo\` to regenerate and re-approve it`,
+      );
+      return "halted";
+    }
+    inputs.push({ name: inputPhase, path: SPINE[inputPhase].artifact, content });
   }
 
   // -- the turn loop under the deterministic-gate policy ------------------------
