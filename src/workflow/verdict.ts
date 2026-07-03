@@ -35,7 +35,8 @@ export function parseVerdict(text: string): Verdict | null {
   if (typeof raw !== "object" || raw === null) return null;
   const verdict = (raw as { verdict?: unknown }).verdict;
   if (verdict !== "clean" && verdict !== "findings") return null;
-  const rawFindings = (raw as { findings?: unknown }).findings ?? [];
+  const findingsValue = (raw as { findings?: unknown }).findings;
+  const rawFindings = findingsValue === undefined ? [] : findingsValue;
   if (!Array.isArray(rawFindings)) return null;
 
   const findings: Finding[] = [];

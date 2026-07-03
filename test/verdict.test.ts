@@ -33,4 +33,9 @@ describe("parseVerdict", () => {
     expect(parseVerdict(wrap('{ "verdict": "maybe", "findings": [] }'))).toBeNull();
     expect(parseVerdict(wrap('{ "verdict": "clean", "findings": [{ "severity": "huge" }] }'))).toBeNull();
   });
+
+  it("rejects explicit null findings but tolerates an absent findings key", () => {
+    expect(parseVerdict(wrap('{ "verdict": "findings", "findings": null }'))).toBeNull();
+    expect(parseVerdict(wrap('{ "verdict": "clean" }'))).toEqual({ verdict: "clean", findings: [] });
+  });
 });
