@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TurnRequest } from "../src/adapter/types.js";
+import { EMPTY_USAGE } from "../src/adapter/types.js";
 import { runReviewPhase } from "../src/workflow/review.js";
 import { sha256 } from "../src/workflow/hash.js";
 import {
@@ -197,6 +198,25 @@ describe("runReviewPhase: clean path and commit chain", () => {
     expect(show).not.toContain(".tackle");
   });
 
+  it("does not run repo hooks when committing (a turn-writable pre-commit hook must not smuggle changes in)", async () => {
+    const dir = await tempGitRepo();
+    const diff = await seedApprovedBuild(dir);
+    const { mkdir, chmod } = await import("node:fs/promises");
+    const { existsSync } = await import("node:fs");
+    await mkdir(join(dir, ".git", "hooks"), { recursive: true });
+    const hookPath = join(dir, ".git", "hooks", "pre-commit");
+    await writeFile(hookPath, "#!/bin/sh\necho x > smuggled.ts\ngit add smuggled.ts\n");
+    await chmod(hookPath, 0o755);
+    const outcome = await runReviewPhase({
+      workdir: dir, reviewer: reviewerSaying(CLEAN, diff), author: unusedAuthor(), presenter: approveAll,
+    });
+    expect(outcome).toBe("approved");
+    const { git } = await import("../src/adapter/diff.js");
+    const show = await git(dir, ["show", "--stat", "HEAD"]);
+    expect(show).not.toContain("smuggled");
+    expect(existsSync(join(dir, "smuggled.ts"))).toBe(false);
+  });
+
   it("refuses to commit when the tree changed between review-pass and approval", async () => {
     const dir = await tempGitRepo();
     const diff = await seedApprovedBuild(dir);
@@ -296,6 +316,17 @@ describe("runReviewPhase: fix loop", () => {
     ]);
     const outcome = await runReviewPhase({ workdir: dir, reviewer, author, presenter: capturingPresenter(true) });
     expect(outcome).toBe("halted");
+  });
+
+  it("halts when a fix turn bills metered (fail-closed billing gate applies to fix turns too)", async () => {
+    const dir = await tempGitRepo();
+    await seedApprovedBuild(dir);
+    const reviewer = liveReviewer([FINDINGS_A]);
+    const author = scriptedAdapter([async () => fakeTurn({ usage: { tokens: EMPTY_USAGE, billingType: "metered" } })]);
+    const presenter = capturingPresenter(true);
+    const outcome = await runReviewPhase({ workdir: dir, reviewer, author, presenter });
+    expect(outcome).toBe("halted");
+    expect(presenter.messages.join("\n")).toContain("billed metered");
   });
 
   it("halts when a fix turn empties the working tree", async () => {

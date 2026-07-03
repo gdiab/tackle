@@ -26,6 +26,7 @@ function makeEnv(knobs: {
   exitCode?: number;
   promptFile?: string;
   writeFile?: { path: string; content: string };
+  envFile?: string;
   sleepMs?: number;
 }): { PATH: string; HOME: string; USER: string } {
   const home = mkdtempSync(join(tmpdir(), "tackle-home-"));
@@ -87,6 +88,17 @@ describe("ClaudeAdapter", () => {
     const adapter = new ClaudeAdapter({ baseEnv: env, readCredentials: async () => SUB_CREDS });
     const result = await adapter.run({ prompt: "p", workdir: repo, effort: "medium" });
     expect(result.workdirDiff).toContain("sneaky.ts");
+  });
+
+  it("passes USER through to the subprocess env (macOS Keychain resolution)", async () => {
+    const repo = makeRepo();
+    const home = mkdtempSync(join(tmpdir(), "tackle-envprobe-"));
+    const envFile = join(home, "env-probe.json");
+    const env = makeEnv({ envFile });
+    const adapter = new ClaudeAdapter({ baseEnv: env, readCredentials: async () => SUB_CREDS });
+    await adapter.run({ prompt: "p", workdir: repo, effort: "medium" });
+    const probe = JSON.parse(readFileSync(envFile, "utf8"));
+    expect(probe.USER).toBe("testuser");
   });
 
   it("times out a hung subprocess", async () => {

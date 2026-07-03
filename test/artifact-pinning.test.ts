@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runPhase } from "../src/workflow/phase.js";
@@ -6,6 +6,7 @@ import { sha256 } from "../src/workflow/hash.js";
 import {
   approveAll,
   capturingPresenter,
+  rejectAll,
   scriptedAdapter,
   tempWorkdir,
   writesArtifact,
@@ -62,5 +63,20 @@ describe("artifact pinning at approval", () => {
     const plan = scriptedAdapter([writesArtifact(".tackle/plan.md", "# plan\n")]);
     const outcome = await runPhase({ phase: "plan", workdir: dir, adapter: plan, presenter: approveAll, canEnter: false });
     expect(outcome).toBe("approved");
+  });
+
+  it("presentGate fails closed when the artifact is deleted while awaiting approval", async () => {
+    const dir = await tempWorkdir();
+    const adapter = scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs\n")]);
+    // leaves specs awaiting_approval (gate rejected, artifact never approved/pinned)
+    await runPhase({ phase: "specs", workdir: dir, adapter, presenter: rejectAll, canEnter: true, request: "r" });
+    await rm(join(dir, ".tackle", "specs.md")); // artifact deleted while awaiting_approval
+    const presenter = capturingPresenter(true);
+    const outcome = await runPhase({ phase: "specs", workdir: dir, adapter, presenter, canEnter: true });
+    expect(outcome).toBe("rejected");
+    expect(presenter.messages.join("\n")).toContain("missing or blank; cannot present");
+    const state = JSON.parse(await readFile(join(dir, ".tackle", "workflow.json"), "utf8"));
+    expect(state.phases.specs.status).toBe("awaiting_approval");
+    expect(state.phases.specs.artifactHash).toBeUndefined();
   });
 });

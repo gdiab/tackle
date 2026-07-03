@@ -52,6 +52,13 @@ export async function presentGate(
   const def = SPINE[phase];
   const phaseState = state.phases[phase];
   if (phaseState === undefined) throw new Error(`no ${phase} state to present`);
+  const artifact = await readArtifact(opts.workdir, def.artifact);
+  if (artifact === null) {
+    opts.presenter.inform(
+      `${def.artifact} is missing or blank; cannot present the ${phase} gate — re-run \`tackle ${phase} --redo\``,
+    );
+    return false;
+  }
   const approved = await opts.presenter.askApproval({
     title: `${phase} phase awaiting approval`,
     artifactPath: def.artifact,
@@ -62,8 +69,7 @@ export async function presentGate(
     phaseState.status = "approved";
     // Pin what was approved: later consumers verify against these hashes so a
     // subsequent turn cannot silently rewrite an already-approved artifact.
-    const artifact = await readArtifact(opts.workdir, def.artifact);
-    if (artifact !== null) phaseState.artifactHash = sha256(artifact);
+    phaseState.artifactHash = sha256(artifact);
     if (phase === "build") {
       const diff = await readArtifact(opts.workdir, BUILD_DIFF_FILE);
       if (diff !== null) phaseState.diffHash = sha256(diff);
@@ -249,7 +255,7 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
         result.usage.billingType === "metered"
           ? "halted: turn billed metered; fix adapter auth before re-running (subscription-before-API gate)"
           : "halted: could not verify subscription billing (billing type unknown); refusing to proceed " +
-              "— check the adapter's auth (e.g. ~/.codex/auth.json)",
+              "— check the adapter's credentials (Claude Code login, or ~/.codex/auth.json for codex)",
       );
       return "halted";
     }

@@ -133,7 +133,8 @@ async function commitReviewed(
       `unexpected unstaged changes after staging; refusing to commit:\n${unstaged.join("\n")}`,
     );
   }
-  await git(workdir, ["commit", "-m", commitMessage(state)]);
+  // hooks live in turn-writable .git/ and run after the hash check — never execute them
+  await git(workdir, ["-c", "core.hooksPath=/dev/null", "commit", "--no-verify", "-m", commitMessage(state)]);
   const sha = (await git(workdir, ["rev-parse", "HEAD"])).trim();
   review.status = "approved";
   review.commitSha = sha;
