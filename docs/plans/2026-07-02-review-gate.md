@@ -1860,6 +1860,14 @@ git commit -m "Run the review phase: cross-model gate, drift checks, hash-matche
 - Consumes: `buildFixPrompt` (Task 6), `billingHaltMessage`, `runReviewerTurn`, `presentReviewGateAndCommit` (Task 7).
 - Produces: the final loop semantics — `reviewLoopIterations` = max fix turns; circuit breaker escalates when the same blocking findings repeat `circuitBreakerThreshold` consecutive rounds; each fix turn re-freezes `.tackle/build.diff` and updates `state.phases.build.diffHash` (custody pin).
 
+Task 7's review left two Minors for this task to sweep:
+1. A resumed escalation gate loses its "unresolved blocking findings" warning
+   (resume calls `presentReviewGateAndCommit` with no detail). Fix: `PhaseState`
+   gains `gateDetail?: string` (review only); `finish()` persists the escalation
+   string there; the resume path passes `own.gateDetail` through.
+2. The porcelain filter `l.slice(3).startsWith(".tackle")` also exempts
+   `.tackleX`. Fix: `const p = l.slice(3); p === ".tackle" || p.startsWith(".tackle/")`.
+
 - [ ] **Step 1: Write the failing tests** — add to `test/review.test.ts`:
 
 ```typescript
