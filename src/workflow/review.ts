@@ -96,6 +96,9 @@ async function commitReviewed(
     return haltReview(workdir, state, null, presenter, "no reviewed-diff hash on record; re-run `tackle review --redo`");
   }
   const diffNow = await captureWorkdirDiff(workdir, await resolveHead(workdir));
+  if (diffNow.length === 0) {
+    return haltReview(workdir, state, null, presenter, "working tree has no changes; nothing to commit — re-run `tackle build --redo`");
+  }
   if (sha256(diffNow) !== expected) {
     return haltReview(
       workdir,
@@ -327,7 +330,15 @@ async function reviewLoop(ctx: LoopContext): Promise<PhaseOutcome> {
     fixesDone += 1;
     rounds[rounds.length - 1] = { round, verdict, fixSummary: fix.result.summary };
     currentDiff = fix.result.workdirDiff;
-    if (currentDiff.length === 0) presenter.inform("warning: fix turn produced an empty diff");
+    if (currentDiff.length === 0) {
+      return haltReview(
+        workdir,
+        state,
+        fix.result,
+        presenter,
+        "fix turn emptied the working tree; nothing left to review or commit — re-run `tackle build --redo`",
+      );
+    }
     await writeFile(join(workdir, BUILD_DIFF_FILE), currentDiff);
     // custody pin: build.diffHash always names the currently frozen diff, so a
     // killed loop can resume (design refinement in the plan header)

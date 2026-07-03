@@ -298,6 +298,26 @@ describe("runReviewPhase: fix loop", () => {
     expect(outcome).toBe("halted");
   });
 
+  it("halts when a fix turn empties the working tree", async () => {
+    const dir = await tempGitRepo();
+    await seedApprovedBuild(dir);
+    const reviewer = liveReviewer([FINDINGS_A]);
+    // author "fixes" by reverting the seeded change entirely -> empty diff
+    const author = scriptedAdapter([
+      async (req) => {
+        const { rm } = await import("node:fs/promises");
+        await rm(join(req.workdir, "w.ts"));
+        const { captureWorkdirDiff, resolveHead } = await import("../src/adapter/diff.js");
+        return fakeTurn({ summary: "reverted", workdirDiff: await captureWorkdirDiff(req.workdir, await resolveHead(req.workdir)) });
+      },
+    ]);
+    const presenter = capturingPresenter(true);
+    const outcome = await runReviewPhase({ workdir: dir, reviewer, author, presenter });
+    expect(outcome).toBe("halted");
+    expect(presenter.messages.join("\n")).toContain("emptied the working tree");
+    expect((await readState(dir)).phases.review.status).toBe("halted");
+  });
+
   it("resumed escalation gate preserves the original detail (gateDetail)", async () => {
     const dir = await tempGitRepo();
     await seedApprovedBuild(dir);
