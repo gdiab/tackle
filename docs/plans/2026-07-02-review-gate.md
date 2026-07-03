@@ -1182,6 +1182,11 @@ export async function tempGitRepo(): Promise<string> {
 }
 ```
 
+Give the existing `scriptedAdapter` an optional adapter name so the cross-model
+gate (which compares `reviewer.name` against the recorded build author) can be
+exercised for real: `scriptedAdapter(behaviors, name = "fake")` returning
+`{ name, prompts, run }`. Existing callers are unaffected.
+
 Also add a state-seeding helper so review tests don't re-run the whole spine:
 
 ```typescript
@@ -1351,9 +1356,13 @@ describe("runReviewPhase: clean path and commit chain", () => {
         await writeFile(join(dir, ".tackle", "workflow.json"), JSON.stringify(state));
       }
       const presenter = capturingPresenter(true);
-      const outcome = await runReviewPhase({
-        workdir: dir, reviewer: reviewerSaying(CLEAN, diff), author: unusedAuthor(), presenter,
-      });
+      // reviewer named "claude-code" so the same-runtime comparison (reviewer.name
+      // vs recorded build author) actually trips in the second iteration
+      const reviewer = scriptedAdapter(
+        [async () => fakeTurn({ summary: CLEAN, workdirDiff: diff })],
+        "claude-code",
+      );
+      const outcome = await runReviewPhase({ workdir: dir, reviewer, author: unusedAuthor(), presenter });
       expect(outcome).toBe("halted");
     }
   });
@@ -1579,9 +1588,11 @@ async function commitReviewed(
     );
   }
   // .tackle/ is harness state, never part of the reviewed diff (captureWorkdirDiff
-  // excludes it) — exclude it from staging too, so the chain holds even in repos
-  // that don't gitignore it.
-  await git(workdir, ["add", "-A", "--", ".", ":(exclude).tackle"]);
+  // excludes it) — keep it out of staging too, so the chain holds even in repos
+  // that don't gitignore it. Staged-then-unstaged rather than an exclude pathspec:
+  // git exits 1 when an ignored path is named in any pathspec, even an exclude.
+  await git(workdir, ["add", "-A"]);
+  await git(workdir, ["reset", "-q", "HEAD", "--", ".tackle"]);
   // Belt and suspenders: everything the reviewer passed must now be staged.
   const porcelain = await git(workdir, ["status", "--porcelain"]);
   const unstaged = porcelain
