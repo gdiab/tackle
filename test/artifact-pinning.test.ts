@@ -43,6 +43,18 @@ describe("artifact pinning at approval", () => {
     expect(presenter.messages.join("\n")).toContain("changed after specs was approved");
   });
 
+  it("halts a phase whose approved input artifact was emptied after approval", async () => {
+    const dir = await tempWorkdir();
+    const specs = scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs\n")]);
+    await runPhase({ phase: "specs", workdir: dir, adapter: specs, presenter: approveAll, canEnter: true, request: "r" });
+    await writeFile(join(dir, ".tackle", "specs.md"), "");
+    const presenter = capturingPresenter(true);
+    const plan = scriptedAdapter([writesArtifact(".tackle/plan.md", "# plan\n")]);
+    const outcome = await runPhase({ phase: "plan", workdir: dir, adapter: plan, presenter, canEnter: false });
+    expect(outcome).toBe("halted");
+    expect(presenter.messages.join("\n")).toContain("missing or blank but specs was approved");
+  });
+
   it("accepts an unmodified approved input", async () => {
     const dir = await tempWorkdir();
     const specs = scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs\n")]);

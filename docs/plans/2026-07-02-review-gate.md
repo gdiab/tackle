@@ -1683,11 +1683,13 @@ export async function runReviewPhase(opts: RunReviewOptions): Promise<PhaseOutco
   }
 
   // -- requirement input: hash-verified specs, else the workflow request ----------
+  // An approved phase always pinned a non-blank artifact, so pin-present with the
+  // file missing/blank is tamper too (blanking must not demote the requirement).
   let requirement = { label: "workflow request", content: state.request };
+  const specsPinned = state.phases.specs?.artifactHash;
   const specsContent = await readArtifact(workdir, SPINE.specs.artifact);
   if (specsContent !== null) {
-    const pinned = state.phases.specs?.artifactHash;
-    if (pinned !== undefined && sha256(specsContent) !== pinned) {
+    if (specsPinned !== undefined && sha256(specsContent) !== specsPinned) {
       return haltReview(
         workdir,
         state,
@@ -1697,6 +1699,14 @@ export async function runReviewPhase(opts: RunReviewOptions): Promise<PhaseOutco
       );
     }
     requirement = { label: `specs (${SPINE.specs.artifact})`, content: specsContent };
+  } else if (specsPinned !== undefined) {
+    return haltReview(
+      workdir,
+      state,
+      null,
+      presenter,
+      `${SPINE.specs.artifact} is missing or blank but specs was approved; re-run \`tackle specs --redo\``,
+    );
   }
 
   // -- frozen diff + drift + tamper checks ----------------------------------------

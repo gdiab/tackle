@@ -187,10 +187,20 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
   const questionsAndAnswers = (await readArtifact(workdir, def.questionsFile)) ?? undefined;
   const inputs: Array<{ name: string; path: string; content: string }> = [];
   for (const inputPhase of def.inputs) {
-    // Missing inputs are phases skipped by the entry point, not errors.
     const content = await readArtifact(workdir, SPINE[inputPhase].artifact);
-    if (content === null) continue;
     const pinned = state.phases[inputPhase]?.artifactHash;
+    if (content === null) {
+      // Missing inputs are phases skipped by the entry point — but an approved
+      // phase pinned a non-blank artifact, so pin-present + missing/blank = tamper.
+      if (pinned !== undefined) {
+        presenter.inform(
+          `${SPINE[inputPhase].artifact} is missing or blank but ${inputPhase} was approved; ` +
+            `re-run \`tackle ${inputPhase} --redo\` to regenerate and re-approve it`,
+        );
+        return "halted";
+      }
+      continue;
+    }
     if (pinned !== undefined && sha256(content) !== pinned) {
       presenter.inform(
         `${SPINE[inputPhase].artifact} changed after ${inputPhase} was approved; ` +
