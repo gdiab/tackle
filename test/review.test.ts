@@ -42,7 +42,9 @@ describe("runReviewPhase: clean path and commit chain", () => {
     expect(state.phases.review.status).toBe("approved");
     expect(state.phases.review.reviewedDiffHash).toBe(sha256(diff));
     expect(state.phases.review.commitSha).toMatch(/^[0-9a-f]{40}$/);
-    expect(await readFile(join(dir, ".tackle", "review.md"), "utf8")).toContain("clean");
+    const reviewMd = await readFile(join(dir, ".tackle", "review.md"), "utf8");
+    expect(reviewMd).toContain("clean");
+    expect(state.phases.review.artifactHash).toBe(sha256(reviewMd));
     // the commit actually exists and contains the change, not .tackle
     const { git } = await import("../src/adapter/diff.js");
     const show = await git(dir, ["show", "--stat", "HEAD"]);
@@ -61,6 +63,24 @@ describe("runReviewPhase: clean path and commit chain", () => {
     expect(outcome).toBe("rejected");
     const { git } = await import("../src/adapter/diff.js");
     expect(await git(dir, ["log", "--oneline"])).not.toContain("add widget");
+  });
+
+  it("fails closed when the review artifact is missing at gate-presentation time", async () => {
+    const dir = await tempGitRepo();
+    const diff = await seedApprovedBuild(dir);
+    // clean review leaves review.status "awaiting_approval" (gate rejected)
+    await runReviewPhase({ workdir: dir, reviewer: reviewerSaying(CLEAN, diff), author: unusedAuthor(), presenter: rejectAll });
+    const { rm } = await import("node:fs/promises");
+    await rm(join(dir, ".tackle", "review.md"));
+    const presenter = capturingPresenter(true);
+    const throwingReviewer = scriptedAdapter([async () => { throw new Error("must not run a turn on resume"); }]);
+    const outcome = await runReviewPhase({ workdir: dir, reviewer: throwingReviewer, author: unusedAuthor(), presenter });
+    expect(outcome).toBe("rejected");
+    expect(presenter.messages.join("\n")).toContain("missing or blank; cannot present the review gate");
+    const { git } = await import("../src/adapter/diff.js");
+    expect(await git(dir, ["log", "--oneline"])).not.toContain("add widget");
+    const state = await readState(dir);
+    expect(state.phases.review.status).toBe("awaiting_approval");
   });
 
   it("verifies specs against its pinned hash before reviewing", async () => {

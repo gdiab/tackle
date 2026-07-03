@@ -52,7 +52,21 @@ export async function loadPolicyConfig(workdir: string): Promise<PolicyConfig> {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error(`${CONFIG_FILE} must contain a JSON object`);
   }
-  const merged = { ...DEFAULT_POLICY, ...(parsed as Partial<PolicyConfig>) };
-  merged.deterministicRetries = Math.max(0, merged.deterministicRetries);
+  const overrides = parsed as Partial<Record<keyof PolicyConfig, unknown>>;
+  const merged = { ...DEFAULT_POLICY };
+  const bounds: Record<keyof PolicyConfig, number> = {
+    deterministicRetries: 0,
+    reviewLoopIterations: 0,
+    circuitBreakerThreshold: 1,
+  };
+  for (const key of Object.keys(bounds) as (keyof PolicyConfig)[]) {
+    if (!(key in overrides)) continue;
+    const value = overrides[key];
+    const min = bounds[key];
+    if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value) || value < min) {
+      throw new Error(`${CONFIG_FILE}: ${key} must be an integer >= ${min}`);
+    }
+    merged[key] = value;
+  }
   return merged;
 }

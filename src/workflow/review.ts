@@ -89,6 +89,7 @@ async function commitReviewed(
   workdir: string,
   state: WorkflowState,
   presenter: Presenter,
+  artifact: string,
 ): Promise<PhaseOutcome> {
   const review = state.phases.review;
   const expected = review?.reviewedDiffHash;
@@ -138,8 +139,7 @@ async function commitReviewed(
   const sha = (await git(workdir, ["rev-parse", "HEAD"])).trim();
   review.status = "approved";
   review.commitSha = sha;
-  const reviewMd = await readArtifact(workdir, SPINE.review.artifact);
-  if (reviewMd !== null) review.artifactHash = sha256(reviewMd);
+  review.artifactHash = sha256(artifact);
   await writeWorkflowState(workdir, state);
   presenter.inform(`committed ${sha.slice(0, 10)}`);
   return "approved";
@@ -153,6 +153,13 @@ async function presentReviewGateAndCommit(
 ): Promise<PhaseOutcome> {
   const review = state.phases.review;
   if (review === undefined) throw new Error("no review state to present");
+  const artifact = await readArtifact(workdir, SPINE.review.artifact);
+  if (artifact === null) {
+    presenter.inform(
+      `${SPINE.review.artifact} is missing or blank; cannot present the review gate — re-run \`tackle review --redo\``,
+    );
+    return "rejected";
+  }
   const approved = await presenter.askApproval({
     title: "review phase awaiting approval",
     artifactPath: SPINE.review.artifact,
@@ -160,7 +167,7 @@ async function presentReviewGateAndCommit(
     detail: detail ?? "approval stages and commits the reviewed diff",
   });
   if (!approved) return "rejected";
-  return commitReviewed(workdir, state, presenter);
+  return commitReviewed(workdir, state, presenter, artifact);
 }
 
 export async function runReviewPhase(opts: RunReviewOptions): Promise<PhaseOutcome> {

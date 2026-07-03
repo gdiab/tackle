@@ -71,12 +71,53 @@ describe("policy config", () => {
     await expect(loadPolicyConfig(dir)).rejects.toThrow(/must contain a JSON object/);
   });
 
-  it("clamps a negative deterministicRetries to 0", async () => {
+  it("throws a readable error naming the key when deterministicRetries is negative", async () => {
     const dir = await tempWorkdir();
     await mkdir(join(dir, ".tackle"), { recursive: true });
     await writeFile(join(dir, ".tackle", "config.json"), JSON.stringify({ deterministicRetries: -5 }));
+    await expect(loadPolicyConfig(dir)).rejects.toThrow(/deterministicRetries/);
+  });
+
+  it("throws a readable error naming the key when a policy value is a non-numeric string", async () => {
+    const dir = await tempWorkdir();
+    await mkdir(join(dir, ".tackle"), { recursive: true });
+    await writeFile(join(dir, ".tackle", "config.json"), JSON.stringify({ reviewLoopIterations: "never" }));
+    await expect(loadPolicyConfig(dir)).rejects.toThrow(/reviewLoopIterations/);
+  });
+
+  it("throws a readable error when a policy value is a non-integer float", async () => {
+    const dir = await tempWorkdir();
+    await mkdir(join(dir, ".tackle"), { recursive: true });
+    await writeFile(join(dir, ".tackle", "config.json"), JSON.stringify({ deterministicRetries: 1.5 }));
+    await expect(loadPolicyConfig(dir)).rejects.toThrow(/deterministicRetries/);
+  });
+
+  it("throws when circuitBreakerThreshold is 0 (must be >= 1)", async () => {
+    const dir = await tempWorkdir();
+    await mkdir(join(dir, ".tackle"), { recursive: true });
+    await writeFile(join(dir, ".tackle", "config.json"), JSON.stringify({ circuitBreakerThreshold: 0 }));
+    await expect(loadPolicyConfig(dir)).rejects.toThrow(/circuitBreakerThreshold/);
+  });
+
+  it("loads a valid config with all three keys set", async () => {
+    const dir = await tempWorkdir();
+    await mkdir(join(dir, ".tackle"), { recursive: true });
+    await writeFile(
+      join(dir, ".tackle", "config.json"),
+      JSON.stringify({ deterministicRetries: 3, reviewLoopIterations: 5, circuitBreakerThreshold: 2 }),
+    );
     const policy = await loadPolicyConfig(dir);
-    expect(policy.deterministicRetries).toBe(0);
+    expect(policy).toEqual({ deterministicRetries: 3, reviewLoopIterations: 5, circuitBreakerThreshold: 2 });
+  });
+
+  it("defaults keys absent from the config file", async () => {
+    const dir = await tempWorkdir();
+    await mkdir(join(dir, ".tackle"), { recursive: true });
+    await writeFile(join(dir, ".tackle", "config.json"), JSON.stringify({ deterministicRetries: 3 }));
+    const policy = await loadPolicyConfig(dir);
+    expect(policy.deterministicRetries).toBe(3);
+    expect(policy.reviewLoopIterations).toBe(DEFAULT_POLICY.reviewLoopIterations);
+    expect(policy.circuitBreakerThreshold).toBe(DEFAULT_POLICY.circuitBreakerThreshold);
   });
 });
 

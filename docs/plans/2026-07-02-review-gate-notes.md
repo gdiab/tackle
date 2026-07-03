@@ -87,6 +87,9 @@ proof wording, custody refinement, verdict optional-field leniency).
 - `vitest.config.ts` testTimeout 15s→30s masks CPU-contention flakiness whose
   root cause is `test/exec.test.ts`'s unref'd `sleep 30` grandchildren — a
   bounded-sleep or pool-concurrency fix is the elegant version.
+- Stage-window race (hash check → git add) is inside the accepted
+  hostile-author boundary; v2 hardening is committing the verified tree via
+  git plumbing. (Codex cross-model review finding.)
 
 ## Environment facts pinned along the way
 

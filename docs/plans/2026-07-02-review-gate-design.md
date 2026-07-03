@@ -164,7 +164,11 @@ source, so a hostile turn could rewrite the hashes too. v1 defends against
 accident and drift, not a malicious author. Hooks are neutralized at commit
 time (see "The commit chain"); the rest of that surface is documented risk.
 Moving state to a turn-inaccessible source is the noted future hardening
-(SPEC already names it).
+(SPEC already names it). The same boundary covers the stage window: a
+turn-spawned background process could mutate the tree in the instants between
+the pre-stage hash check and `git add`; closing it means committing the
+verified tree via plumbing (`write-tree`/`commit-tree`), which is the v2
+hardening.
 
 ## Policy and error handling
 
