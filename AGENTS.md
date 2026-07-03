@@ -2,6 +2,11 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+## Merge Rules
+
+- Run a Codex cross-model review pass (`codex:codex-rescue`) on the branch diff before every merge to main — same-model reviewers share blind spots.
+- Do not add Co-Authored-By or session-link trailers to commit messages.
+
 ## Quick Reference
 
 ```bash
