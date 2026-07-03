@@ -60,10 +60,12 @@ export function createVitestCoverageRunner(
           if (result.timedOut) return { error: "coverage run timed out" };
           return noCoverageError();
         }
-        const parsed = JSON.parse(await readFile(finalPath, "utf8")) as Record<
-          string,
-          IstanbulFileCoverage
-        >;
+        let parsed: Record<string, IstanbulFileCoverage>;
+        try {
+          parsed = JSON.parse(await readFile(finalPath, "utf8"));
+        } catch {
+          return { error: "coverage output was not valid JSON" };
+        }
         // v8's --coverage.reportOnFailure still writes coverage-final.json when no
         // test file matched at all; an empty map means nothing ran, not "ran but
         // touched no source" (a real run always instruments its test file's
