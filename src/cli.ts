@@ -6,6 +6,10 @@ import { Command, InvalidArgumentError, Option } from "commander";
 import { ClaudeAdapter } from "./adapter/claude/index.js";
 import { CodexAdapter } from "./adapter/codex/index.js";
 import type { Adapter, Effort } from "./adapter/types.js";
+import { buildMap } from "./map/builder.js";
+import { createVitestCoverageRunner } from "./map/coverage.js";
+import { describeMap, testsFor } from "./map/query.js";
+import { readTestMap, TEST_MAP_FILE, writeTestMap } from "./map/store.js";
 import { runPhase } from "./workflow/phase.js";
 import type { Presenter } from "./workflow/presenter.js";
 import { TerminalPresenter } from "./workflow/presenter.js";
@@ -40,6 +44,71 @@ interface PhaseCliOptions {
   redo?: boolean;
   skipSpecs?: boolean;
   trivial?: boolean;
+}
+
+function registerMapCommands(program: Command, writeOut: (s: string) => void): void {
+  const map = program.command("map").description("Source-to-test dependency map (TDAD)");
+
+  map
+    .command("build")
+    .description(`Build or refresh ${TEST_MAP_FILE} from the import graph + per-test coverage`)
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .option("--no-coverage", "skip per-test coverage runs (static import graph only)")
+    .action(async (options: { cwd: string; coverage: boolean }) => {
+      const previous = await readTestMap(options.cwd);
+      const runner = options.coverage ? createVitestCoverageRunner(options.cwd) : null;
+      if (options.coverage && runner === null) {
+        writeOut("warning: vitest not found from the working directory; building a static-only map\n");
+      }
+      const built = await buildMap({
+        workdir: options.cwd,
+        runner,
+        previous,
+        log: (message) => writeOut(`${message}\n`),
+      });
+      await writeTestMap(options.cwd, built);
+      const status = describeMap(built);
+      writeOut(
+        `${TEST_MAP_FILE}: ${status.testCount} test file(s) -> ${status.sourceCount} source file(s) (${status.mode})\n`,
+      );
+      for (const testFile of status.coverageFailures) writeOut(`coverage failed: ${testFile}\n`);
+    });
+
+  map
+    .command("query")
+    .description("List the tests that exercise a source file")
+    .argument("<file>", "source file (repo-relative or absolute)")
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .action(async (file: string, options: { cwd: string }) => {
+      const result = await testsFor(options.cwd, file);
+      if (result.kind === "no-map") {
+        writeOut("no test map; run `tackle map build` first\n");
+        process.exitCode = 1;
+        return;
+      }
+      if (result.kind === "unmapped") {
+        writeOut(`unmapped: no known test exercises ${file} — write the test first\n`);
+        return;
+      }
+      for (const edge of result.tests) writeOut(`${edge.test} (${edge.method})\n`);
+    });
+
+  map
+    .command("status")
+    .description("Show test-map freshness and coverage failures")
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .action(async (options: { cwd: string }) => {
+      const current = await readTestMap(options.cwd);
+      if (current === null) {
+        writeOut("no test map; run `tackle map build` first\n");
+        process.exitCode = 1;
+        return;
+      }
+      const status = describeMap(current);
+      writeOut(`built ${status.builtAt} (${status.mode})\n`);
+      writeOut(`${status.testCount} test file(s) -> ${status.sourceCount} source file(s)\n`);
+      for (const testFile of status.coverageFailures) writeOut(`coverage failed: ${testFile}\n`);
+    });
 }
 
 export function buildProgram(
@@ -181,6 +250,8 @@ export function buildProgram(
       const commit = state.phases.review?.commitSha;
       if (commit !== undefined) writeOut(`commit ${commit.slice(0, 10)}\n`);
     });
+
+  registerMapCommands(program, writeOut);
 
   return program;
 }
