@@ -11,7 +11,11 @@ export interface PromptOptions {
   retryNote?: string;
 }
 
-const PHASE_INSTRUCTIONS: Record<PhaseName, (def: PhaseDef) => string> = {
+// review never runs through a turn prompt (its runner assembles its own agent
+// interaction), so it is excluded from the phases buildPhasePrompt supports.
+export type TurnPhase = Exclude<PhaseName, "review">;
+
+const PHASE_INSTRUCTIONS: Record<TurnPhase, (def: PhaseDef) => string> = {
   specs: (def) =>
     `You are running the specs phase of a phase-gated development workflow. ` +
     `Produce a requirements document for the request below: the problem, the desired behavior, ` +
@@ -41,6 +45,9 @@ const PHASE_INSTRUCTIONS: Record<PhaseName, (def: PhaseDef) => string> = {
 
 export function buildPhasePrompt(opts: PromptOptions): string {
   const { def } = opts;
+  if (def.name === "review") {
+    throw new Error("the review phase runs through runReviewPhase, not turn prompts");
+  }
   const sections: string[] = [
     PHASE_INSTRUCTIONS[def.name](def),
     // SPEC.md clarification precondition: detect-ask-wait instead of guessing.

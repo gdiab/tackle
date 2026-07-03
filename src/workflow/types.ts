@@ -1,6 +1,6 @@
 import type { Authorship, BillingType, TurnStatus } from "../adapter/types.js";
 
-export type PhaseName = "specs" | "plan" | "build" | "pr";
+export type PhaseName = "specs" | "plan" | "build" | "review" | "pr";
 
 // Absent from WorkflowState.phases = not started. "halted" = a gate budget was
 // exhausted or the billing gate fired; re-runnable, kept for `tackle status`.

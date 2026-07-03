@@ -74,6 +74,9 @@ export async function presentGate(
 }
 
 export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
+  if (opts.phase === "review") {
+    throw new Error("the review phase runs through runReviewPhase, not runPhase");
+  }
   const def = SPINE[opts.phase];
   const { presenter, workdir } = opts;
   let state = await readWorkflowState(workdir);
@@ -133,6 +136,10 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
       return "halted";
     }
     if (predState.status === "awaiting_approval") {
+      if (pred === "review") {
+        presenter.inform(`review is awaiting approval; run \`tackle review\` to approve and commit`);
+        return "halted";
+      }
       const ok = await presentGate(pred, state, opts);
       if (!ok) return "rejected";
     }

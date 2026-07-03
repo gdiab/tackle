@@ -45,7 +45,10 @@ afterEach(() => {
 });
 
 describe("the workflow spine end to end", () => {
-  it("runs specs -> plan -> build -> pr, leaving all artifacts and approvals", async () => {
+  // review's runner doesn't exist yet (that's a later task), so this only runs
+  // through build and confirms pr now refuses to run without a completed review.
+  // A later task restores the full specs -> ... -> pr run once review lands.
+  it("runs specs -> plan -> build, leaving all artifacts and approvals; pr halts without review", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tackle-e2e-"));
     const program = buildProgram({ adapter: phasePlayingAdapter(), presenter: approveAll, writeOut: () => {} });
     program.exitOverride();
@@ -53,17 +56,18 @@ describe("the workflow spine end to end", () => {
     await program.parseAsync(["specs", "add a widget", "--cwd", dir], { from: "user" });
     await program.parseAsync(["plan", "--cwd", dir], { from: "user" });
     await program.parseAsync(["build", "--cwd", dir], { from: "user" });
-    await program.parseAsync(["pr", "--cwd", dir], { from: "user" });
     expect(process.exitCode).toBeUndefined();
 
     const state = JSON.parse(await readFile(join(dir, ".tackle", "workflow.json"), "utf8"));
-    for (const phase of ["specs", "plan", "build", "pr"]) {
+    for (const phase of ["specs", "plan", "build"]) {
       expect(state.phases[phase].status).toBe("approved");
     }
     expect(await readFile(join(dir, ".tackle", "build.diff"), "utf8")).toBe(BUILD_DIFF);
-    expect(await readFile(join(dir, ".tackle", "pr.md"), "utf8")).toContain("# PR: add widget");
     // the authorship record is on every phase (cross-model gate's future input)
     expect(state.phases.build.lastTurn.authorship.adapter).toBe("fake");
+
+    await program.parseAsync(["pr", "--cwd", dir], { from: "user" });
+    expect(process.exitCode).toBe(1); // review is not complete yet
   });
 
   it("resumes across processes: a declined gate is re-presented by the next command", async () => {

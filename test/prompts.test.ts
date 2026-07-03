@@ -3,8 +3,9 @@ import { buildPhasePrompt } from "../src/workflow/prompts.js";
 import { PHASE_ORDER, SPINE } from "../src/workflow/spine.js";
 
 describe("buildPhasePrompt", () => {
-  it("every phase prompt names the phase, its artifact, and its questions file", () => {
-    for (const phase of PHASE_ORDER) {
+  it("every turn-phase prompt names the phase, its artifact, and its questions file", () => {
+    // review has no turn prompt: its runner assembles its own agent interaction (see below).
+    for (const phase of PHASE_ORDER.filter((p) => p !== "review")) {
       const def = SPINE[phase];
       const prompt = buildPhasePrompt({ def, request: "do the thing", inputs: [] });
       expect(prompt).toContain(`running the ${phase} phase`);
@@ -12,6 +13,10 @@ describe("buildPhasePrompt", () => {
       expect(prompt).toContain(def.questionsFile);
       expect(prompt).toContain("## Request\n\ndo the thing");
     }
+  });
+
+  it("refuses to build a turn prompt for the review phase", () => {
+    expect(() => buildPhasePrompt({ def: SPINE.review, request: "r", inputs: [] })).toThrow(/runReviewPhase/);
   });
 
   it("inlines each input artifact under a labeled section", () => {
