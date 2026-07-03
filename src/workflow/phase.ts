@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Adapter, Effort, TurnResult } from "../adapter/types.js";
+import { readTestMap, TEST_MAP_FILE } from "../map/store.js";
 import { readArtifact, removeArtifact } from "./artifacts.js";
 import { sha256 } from "./hash.js";
 import type { Presenter } from "./presenter.js";
@@ -224,6 +225,17 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
     inputs.push({ name: inputPhase, path: SPINE[inputPhase].artifact, content });
   }
 
+  // SPEC advisory-until-map: the build prompt gains targeted test-first
+  // instructions only when a map exists; a corrupt map degrades to no map.
+  let testMapPath: string | undefined;
+  if (opts.phase === "build") {
+    try {
+      if ((await readTestMap(workdir)) !== null) testMapPath = TEST_MAP_FILE;
+    } catch {
+      presenter.inform(`warning: ${TEST_MAP_FILE} is unreadable; running build without the test map`);
+    }
+  }
+
   // -- the turn loop under the deterministic-gate policy ------------------------
   let completed: TurnResult | null = null;
   let lastTurn: TurnResult | null = null;
@@ -235,6 +247,7 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
       inputs,
       ...(questionsAndAnswers === undefined ? {} : { questionsAndAnswers }),
       ...(retryNote === undefined ? {} : { retryNote }),
+      ...(testMapPath === undefined ? {} : { testMapPath }),
     });
     const result = await opts.adapter.run({
       prompt,

@@ -55,6 +55,28 @@ describe("buildPhasePrompt", () => {
     expect(buildPhasePrompt({ def: SPINE.build, request: "r", inputs: [] })).toContain("Do not commit");
     expect(buildPhasePrompt({ def: SPINE.pr, request: "r", inputs: [] })).toContain("git diff");
   });
+
+  it("build prompt gains the map section when a test map exists", () => {
+    const prompt = buildPhasePrompt({
+      def: SPINE.build,
+      request: "r",
+      inputs: [],
+      testMapPath: ".tackle/test-map.json",
+    });
+    expect(prompt).toContain("## Source-to-test map");
+    expect(prompt).toContain(".tackle/test-map.json");
+    expect(prompt).toContain("tackle map query");
+    expect(prompt).toContain("write a failing test first");
+  });
+
+  it("build prompt stays advisory-only without a map; other phases never get the section", () => {
+    expect(buildPhasePrompt({ def: SPINE.build, request: "r", inputs: [] })).not.toContain(
+      "## Source-to-test map",
+    );
+    expect(
+      buildPhasePrompt({ def: SPINE.plan, request: "r", inputs: [], testMapPath: ".tackle/test-map.json" }),
+    ).not.toContain("## Source-to-test map");
+  });
 });
 
 describe("review prompts", () => {

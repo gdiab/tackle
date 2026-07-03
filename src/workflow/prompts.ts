@@ -10,6 +10,8 @@ export interface PromptOptions {
   questionsAndAnswers?: string;
   /** Set on deterministic-retry attempts to tell the agent what went wrong. */
   retryNote?: string;
+  /** Set on the build phase when .tackle/test-map.json exists (advisory-until-map). */
+  testMapPath?: string;
 }
 
 // review never runs through a turn prompt (its runner assembles its own agent
@@ -49,14 +51,25 @@ export function buildPhasePrompt(opts: PromptOptions): string {
   if (def.name === "review") {
     throw new Error("the review phase runs through runReviewPhase, not turn prompts");
   }
-  const sections: string[] = [
-    PHASE_INSTRUCTIONS[def.name](def),
+  const sections: string[] = [PHASE_INSTRUCTIONS[def.name](def)];
+  if (def.name === "build" && opts.testMapPath !== undefined) {
+    sections.push(
+      `## Source-to-test map\n\n` +
+        `A source-to-test dependency map exists at ${opts.testMapPath}. Before modifying any ` +
+        `source file, look up the tests that exercise it — run \`tackle map query <file>\`, or ` +
+        `read the "sources" index in that JSON — and run those tests before and after your ` +
+        `change. If a source file you are changing has no entry in the map, no known test ` +
+        `exercises it: write a failing test first. For new behavior in mapped files, write the ` +
+        `failing test before implementing.`,
+    );
+  }
+  sections.push(
     // SPEC.md clarification precondition: detect-ask-wait instead of guessing.
     `Before doing anything else, assess whether your input is complete and unambiguous enough to act ` +
       `on responsibly. If it is not, write your clarifying questions to ${def.questionsFile} as a ` +
       `markdown list and stop: do not write ${def.artifact} and do not make any other changes.`,
     `## Request\n\n${opts.request}`,
-  ];
+  );
   for (const input of opts.inputs) {
     sections.push(`## Input: ${input.name} (${input.path})\n\n${input.content}`);
   }
