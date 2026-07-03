@@ -1,12 +1,12 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { captureWorkdirDiff, git, resolveHead } from "../src/adapter/diff.js";
 import type { Adapter, TurnRequest } from "../src/adapter/types.js";
 import { buildProgram } from "../src/cli.js";
-import { approveAll, fakeTurn, rejectAll } from "./helpers/workflow.js";
+import { approveAll, fakeTurn, rejectAll, scriptedAdapter, tempGitRepo } from "./helpers/workflow.js";
 
-const BUILD_DIFF = "diff --git a/w.ts b/w.ts\n+export const w = 1;\n";
+const CLEAN = 'done\n\n```json\n{ "verdict": "clean", "findings": [] }\n```\n';
 
 /** Plays each phase by keying on the prompt's "running the <phase> phase" marker. */
 function phasePlayingAdapter(): Adapter {
@@ -27,7 +27,9 @@ function phasePlayingAdapter(): Adapter {
       if (req.prompt.includes("running the build phase")) {
         expect(req.prompt).toContain("# plan: add w.ts");
         await writeFile(join(t, "build-notes.md"), "# notes: added w.ts, tests pass\n");
-        return fakeTurn({ summary: "built it", workdirDiff: BUILD_DIFF });
+        await writeFile(join(req.workdir, "w.ts"), "export const w = 1;\n");
+        const workdirDiff = await captureWorkdirDiff(req.workdir, await resolveHead(req.workdir));
+        return fakeTurn({ summary: "built it", workdirDiff });
       }
       if (req.prompt.includes("running the pr phase")) {
         expect(req.prompt).toContain("# specs: widget");
@@ -40,38 +42,65 @@ function phasePlayingAdapter(): Adapter {
   };
 }
 
+/** Reviewer fake: recomputes the live diff each round and answers clean, from a different runtime. */
+function liveReviewer() {
+  return scriptedAdapter(
+    [
+      async (req: TurnRequest) => {
+        const workdirDiff = await captureWorkdirDiff(req.workdir, await resolveHead(req.workdir));
+        return fakeTurn({
+          summary: CLEAN,
+          workdirDiff,
+          authorship: { adapter: "claude-fake", model: null, effort: "medium" },
+        });
+      },
+    ],
+    "claude-fake",
+  );
+}
+
 afterEach(() => {
   process.exitCode = undefined;
 });
 
 describe("the workflow spine end to end", () => {
-  // review's runner doesn't exist yet (that's a later task), so this only runs
-  // through build and confirms pr now refuses to run without a completed review.
-  // A later task restores the full specs -> ... -> pr run once review lands.
-  it("runs specs -> plan -> build, leaving all artifacts and approvals; pr halts without review", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "tackle-e2e-"));
-    const program = buildProgram({ adapter: phasePlayingAdapter(), presenter: approveAll, writeOut: () => {} });
+  it("runs the full five-phase spine: specs -> plan -> build -> review -> pr", async () => {
+    const dir = await tempGitRepo();
+    const program = buildProgram({
+      adapter: phasePlayingAdapter(),
+      reviewerAdapter: liveReviewer(),
+      presenter: approveAll,
+      writeOut: () => {},
+    });
     program.exitOverride();
 
     await program.parseAsync(["specs", "add a widget", "--cwd", dir], { from: "user" });
     await program.parseAsync(["plan", "--cwd", dir], { from: "user" });
     await program.parseAsync(["build", "--cwd", dir], { from: "user" });
+    await program.parseAsync(["review", "--cwd", dir], { from: "user" });
+    await program.parseAsync(["pr", "--cwd", dir], { from: "user" });
     expect(process.exitCode).toBeUndefined();
 
     const state = JSON.parse(await readFile(join(dir, ".tackle", "workflow.json"), "utf8"));
-    for (const phase of ["specs", "plan", "build"]) {
+    for (const phase of ["specs", "plan", "build", "review", "pr"]) {
       expect(state.phases[phase].status).toBe("approved");
     }
-    expect(await readFile(join(dir, ".tackle", "build.diff"), "utf8")).toBe(BUILD_DIFF);
-    // the authorship record is on every phase (cross-model gate's future input)
+    // the authorship record is on every phase (cross-model gate's input)
     expect(state.phases.build.lastTurn.authorship.adapter).toBe("fake");
+    expect(state.phases.review.commitSha).toMatch(/^[0-9a-f]{40}$/);
 
-    await program.parseAsync(["pr", "--cwd", dir], { from: "user" });
-    expect(process.exitCode).toBe(1); // review is not complete yet
+    // the review commit is real and holds the change, not .tackle
+    const show = await git(dir, ["show", "--stat", state.phases.review.commitSha]);
+    expect(show).toContain("w.ts");
+    expect(show).not.toContain(".tackle");
+    expect(await git(dir, ["log"])).toContain("add a widget");
+
+    // pr ran against the committed tree: build-notes.md was still readable input
+    expect(await readFile(join(dir, ".tackle", "pr.md"), "utf8")).toContain("add widget");
   });
 
   it("resumes across processes: a declined gate is re-presented by the next command", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "tackle-e2e-"));
+    const dir = await tempGitRepo();
     const first = buildProgram({ adapter: phasePlayingAdapter(), presenter: rejectAll, writeOut: () => {} });
     first.exitOverride();
     await first.parseAsync(["specs", "add a widget", "--cwd", dir], { from: "user" });

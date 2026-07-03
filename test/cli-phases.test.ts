@@ -4,7 +4,24 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Adapter, TurnRequest } from "../src/adapter/types.js";
 import { buildProgram } from "../src/cli.js";
-import { approveAll, fakeTurn, rejectAll } from "./helpers/workflow.js";
+import {
+  approveAll,
+  fakeTurn,
+  rejectAll,
+  scriptedAdapter,
+  seedApprovedBuild,
+  tempGitRepo,
+} from "./helpers/workflow.js";
+
+const CLEAN = 'done\n\n```json\n{ "verdict": "clean", "findings": [] }\n```\n';
+
+/** Reviewer fake: echoes the tree's current diff back, from a different runtime than the author. */
+function cleanReviewerFor(diff: string) {
+  return scriptedAdapter(
+    [async () => fakeTurn({ summary: CLEAN, workdirDiff: diff, authorship: { adapter: "claude-fake", model: null, effort: "medium" } })],
+    "claude-fake",
+  );
+}
 
 function artifactWritingAdapter(relPath: string): Adapter & { requests: TurnRequest[] } {
   const requests: TurnRequest[] = [];
@@ -105,5 +122,43 @@ describe("tackle phase commands", () => {
     expect(text).toContain("entry: specs");
     expect(text).toMatch(/specs\s+approved/);
     expect(text).toMatch(/plan\s+pending/);
+  });
+
+  it("review command drives runReviewPhase with reviewer and author adapters", async () => {
+    const dir = await tempGitRepo();
+    const diff = await seedApprovedBuild(dir);
+    const unusedAuthorAdapter = scriptedAdapter([async () => fakeTurn()]);
+    const cleanReviewerAdapter = cleanReviewerFor(diff);
+    const program = buildProgram({
+      adapter: unusedAuthorAdapter,
+      reviewerAdapter: cleanReviewerAdapter,
+      presenter: approveAll,
+      writeOut: () => {},
+    });
+    program.exitOverride();
+    await program.parseAsync(["review", "--cwd", dir], { from: "user" });
+    expect(process.exitCode).toBeUndefined();
+    const state = JSON.parse(await readFile(join(dir, ".tackle", "workflow.json"), "utf8"));
+    expect(state.phases.review.status).toBe("approved");
+    expect(state.phases.review.commitSha).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it("status shows the review phase and its commit", async () => {
+    const dir = await tempGitRepo();
+    const diff = await seedApprovedBuild(dir);
+    const out: string[] = [];
+    const program = buildProgram({
+      adapter: scriptedAdapter([async () => fakeTurn()]),
+      reviewerAdapter: cleanReviewerFor(diff),
+      presenter: approveAll,
+      writeOut: (s) => out.push(s),
+    });
+    program.exitOverride();
+    await program.parseAsync(["review", "--cwd", dir], { from: "user" });
+    out.length = 0;
+    await program.parseAsync(["status", "--cwd", dir], { from: "user" });
+    const text = out.join("");
+    expect(text).toMatch(/review\s+approved/);
+    expect(text).toMatch(/commit [0-9a-f]{10}/);
   });
 });
