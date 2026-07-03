@@ -3,8 +3,12 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "bin": { "tackle": "./dist/cli.js" },
-  "engines": { "node": ">=22" },
+  "bin": {
+    "tackle": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "packageManager": "pnpm@10.16.1",
   "scripts": {
     "build": "tsc",
@@ -18,6 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.0",
+    "@vitest/coverage-v8": "^4.1.9",
     "tsx": "^4.22.5",
     "vitest": "^4.1.9"
   }
