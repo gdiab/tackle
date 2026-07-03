@@ -22,6 +22,10 @@ export interface PhaseState {
   artifactHash?: string;
   /** build only: sha256 of the currently frozen .tackle/build.diff (see design refinement). */
   diffHash?: string;
+  /** review only: sha256 of the diff the reviewer passed; the commit chain's precondition. */
+  reviewedDiffHash?: string;
+  /** review only: the commit created on review approval. */
+  commitSha?: string;
 }
 
 export interface WorkflowState {

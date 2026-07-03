@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-async function git(workdir: string, args: string[]): Promise<string> {
+export async function git(workdir: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync("git", ["-C", workdir, ...args], {
     maxBuffer: 64 * 1024 * 1024,
   });
