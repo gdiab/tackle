@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { BUILD_DIFF_FILE, effectivePredecessor, PHASE_ORDER, SPINE } from "../src/workflow/spine.js";
 
 describe("spine", () => {
-  it("orders the phases specs -> plan -> build -> pr", () => {
-    expect(PHASE_ORDER).toEqual(["specs", "plan", "build", "pr"]);
+  it("orders the phases specs -> plan -> build -> review -> pr", () => {
+    expect(PHASE_ORDER).toEqual(["specs", "plan", "build", "review", "pr"]);
   });
 
   it("names the SPEC.md artifacts", () => {
@@ -25,7 +25,22 @@ describe("spine", () => {
     expect(effectivePredecessor("plan", "specs")).toBe("specs");
     expect(effectivePredecessor("plan", "plan")).toBeNull(); // entered here: no predecessor
     expect(effectivePredecessor("build", "plan")).toBe("plan");
-    expect(effectivePredecessor("pr", "build")).toBe("build");
+    expect(effectivePredecessor("review", "build")).toBe("build");
+    expect(effectivePredecessor("pr", "review")).toBe("review");
     expect(effectivePredecessor("specs", "specs")).toBeNull();
+  });
+
+  it("places review between build and pr", () => {
+    expect(PHASE_ORDER).toEqual(["specs", "plan", "build", "review", "pr"]);
+    expect(SPINE.review.predecessor).toBe("build");
+    expect(SPINE.pr.predecessor).toBe("review");
+    expect(SPINE.review.entryFlag).toBeNull();
+  });
+
+  it("review is always required, whatever the entry point", () => {
+    for (const entry of ["specs", "plan", "build"] as const) {
+      expect(effectivePredecessor("pr", entry)).toBe("review");
+      expect(effectivePredecessor("review", entry)).toBe("build");
+    }
   });
 });

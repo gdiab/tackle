@@ -1,5 +1,6 @@
 import type { PhaseDef } from "./spine.js";
 import type { PhaseName } from "./types.js";
+import type { Finding } from "./verdict.js";
 
 export interface PromptOptions {
   def: PhaseDef;
@@ -11,7 +12,11 @@ export interface PromptOptions {
   retryNote?: string;
 }
 
-const PHASE_INSTRUCTIONS: Record<PhaseName, (def: PhaseDef) => string> = {
+// review never runs through a turn prompt (its runner assembles its own agent
+// interaction), so it is excluded from the phases buildPhasePrompt supports.
+export type TurnPhase = Exclude<PhaseName, "review">;
+
+const PHASE_INSTRUCTIONS: Record<TurnPhase, (def: PhaseDef) => string> = {
   specs: (def) =>
     `You are running the specs phase of a phase-gated development workflow. ` +
     `Produce a requirements document for the request below: the problem, the desired behavior, ` +
@@ -41,6 +46,9 @@ const PHASE_INSTRUCTIONS: Record<PhaseName, (def: PhaseDef) => string> = {
 
 export function buildPhasePrompt(opts: PromptOptions): string {
   const { def } = opts;
+  if (def.name === "review") {
+    throw new Error("the review phase runs through runReviewPhase, not turn prompts");
+  }
   const sections: string[] = [
     PHASE_INSTRUCTIONS[def.name](def),
     // SPEC.md clarification precondition: detect-ask-wait instead of guessing.
@@ -62,4 +70,46 @@ export function buildPhasePrompt(opts: PromptOptions): string {
     sections.push(`## Previous attempt\n\n${opts.retryNote}`);
   }
   return sections.join("\n\n");
+}
+
+export function buildReviewPrompt(opts: {
+  diff: string;
+  requirement: { label: string; content: string };
+}): string {
+  return [
+    `You are the cross-model review gate of a phase-gated development workflow. Review the diff ` +
+      `below — the complete, frozen output of a build phase — against the requirement that follows. ` +
+      `You have no tools; everything you need is in this prompt. Do not modify any files.`,
+    `Report as "blocking" severity: correctness bugs; the diff not implementing the requirement; ` +
+      `missed simplifications — could the change be reframed so whole branches disappear?; and ` +
+      `structural explosions — a file crossing roughly 1,000 lines is a finding, not a shrug. ` +
+      `Report genuine but non-gating improvements as "note" severity.`,
+    `End your reply with exactly one fenced json block in this shape:\n\n` +
+      "```json\n" +
+      `{ "verdict": "clean", "findings": [{ "severity": "blocking", "file": "path/to/file.ts", ` +
+      `"line": 123, "summary": "one line", "detail": "why, and what to do instead" }] }\n` +
+      "```\n\n" +
+      `Use verdict "clean" only when there are no blocking findings; otherwise use "findings". ` +
+      `"line" and "detail" are optional.`,
+    `## Requirement: ${opts.requirement.label}\n\n${opts.requirement.content}`,
+    `## Diff under review\n\n\`\`\`diff\n${opts.diff}\n\`\`\``,
+  ].join("\n\n");
+}
+
+export function buildFixPrompt(opts: { findings: Finding[]; request: string }): string {
+  const list = opts.findings
+    .map(
+      (f) =>
+        `- ${f.file}${f.line === undefined ? "" : `:${f.line}`} — ${f.summary}` +
+        (f.detail === undefined ? "" : `\n  ${f.detail}`),
+    )
+    .join("\n");
+  return [
+    `You are running a fix turn in the review phase of a phase-gated development workflow. A ` +
+      `cross-model review of the uncommitted changes in this repository found blocking findings. ` +
+      `Fix all of them in the working tree. Do not commit; leave every change uncommitted — the ` +
+      `harness re-freezes the diff and re-reviews it. Do not weaken or delete tests to satisfy a finding.`,
+    `## Original request\n\n${opts.request}`,
+    `## Blocking findings\n\n${list}`,
+  ].join("\n\n");
 }

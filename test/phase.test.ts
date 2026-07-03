@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { EMPTY_USAGE } from "../src/adapter/types.js";
 import { runPhase } from "../src/workflow/phase.js";
-import { readWorkflowState } from "../src/workflow/state.js";
+import { readWorkflowState, writeWorkflowState } from "../src/workflow/state.js";
 import {
   approveAll,
   capturingPresenter,
@@ -134,5 +134,52 @@ describe("runPhase deterministic gates", () => {
     });
     expect(outcome).toBe("rejected");
     expect((await readWorkflowState(dir))?.phases.specs?.status).toBe("awaiting_approval");
+  });
+
+  it("refuses to run the review phase through runPhase", async () => {
+    const dir = await tempWorkdir();
+    await expect(
+      runPhase({
+        phase: "review",
+        workdir: dir,
+        adapter: scriptedAdapter([async () => fakeTurn()]),
+        presenter: approveAll,
+        canEnter: false,
+      }),
+    ).rejects.toThrow(/runReviewPhase/);
+  });
+
+  it("does not re-present review's pending gate from pr (review owns its commit)", async () => {
+    const dir = await tempWorkdir();
+    await runPhase({
+      phase: "specs", workdir: dir,
+      adapter: scriptedAdapter([writesArtifact(".tackle/specs.md", "# specs")]),
+      presenter: approveAll, canEnter: true, request: "r",
+    });
+    await runPhase({
+      phase: "plan", workdir: dir,
+      adapter: scriptedAdapter([writesArtifact(".tackle/plan.md", "# plan")]),
+      presenter: approveAll, canEnter: false,
+    });
+    await runPhase({
+      phase: "build", workdir: dir,
+      adapter: scriptedAdapter([writesArtifact(".tackle/build-notes.md", "# notes")]),
+      presenter: approveAll, canEnter: false,
+    });
+
+    // hand-edit the state: review is stuck awaiting_approval (its own runner owns the gate)
+    const state = await readWorkflowState(dir);
+    if (state === null) throw new Error("expected a workflow state after build");
+    state.phases.review = { status: "awaiting_approval" };
+    await writeWorkflowState(dir, state);
+
+    const presenter = capturingPresenter(true);
+    const prAdapter = scriptedAdapter([writesArtifact(".tackle/pr.md", "# pr")]);
+    const outcome = await runPhase({
+      phase: "pr", workdir: dir, adapter: prAdapter, presenter, canEnter: false,
+    });
+    expect(outcome).toBe("halted");
+    expect(presenter.messages.some((m) => m.includes("run `tackle review`"))).toBe(true);
+    expect(prAdapter.prompts).toHaveLength(0);
   });
 });

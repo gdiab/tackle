@@ -1,0 +1,29 @@
+#!/usr/bin/env node
+// Fake claude CLI: consumes stdin, prints one JSON result, exits per $HOME/.fake-claude.json knobs.
+const fs = require("node:fs");
+const path = require("node:path");
+
+let knobs = {};
+try {
+  knobs = JSON.parse(fs.readFileSync(path.join(process.env.HOME, ".fake-claude.json"), "utf8"));
+} catch {}
+
+let stdin = "";
+process.stdin.on("data", (d) => {
+  stdin += d;
+});
+process.stdin.on("end", () => {
+  if (knobs.promptFile) fs.writeFileSync(knobs.promptFile, stdin);
+  if (knobs.writeFile) fs.writeFileSync(knobs.writeFile.path, knobs.writeFile.content);
+  if (knobs.envFile) fs.writeFileSync(knobs.envFile, JSON.stringify({ USER: process.env.USER ?? null }));
+  const result = knobs.result ?? {
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: "ok",
+    session_id: "fake-claude-session",
+    usage: { input_tokens: 1, cache_read_input_tokens: 0, output_tokens: 1 },
+  };
+  process.stdout.write(JSON.stringify(result) + "\n");
+  setTimeout(() => process.exit(knobs.exitCode ?? 0), knobs.sleepMs ?? 0);
+});

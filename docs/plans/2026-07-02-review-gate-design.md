@@ -79,6 +79,11 @@ Codex has no hook system:
          build summary (no model writes the commit message)
       -> record the commit SHA in workflow.json
 
+(Implemented as a structural proof: `git add -A` followed by a porcelain-clean
+check — with nothing left unstaged, staged == worktree == D, equivalent to a
+second hash. The commit runs with hooks disabled: hooks live in turn-writable
+`.git/` and would execute after the hash check.)
+
 Any turn or human edit between review-pass and commit breaks the chain and
 halts. Nothing unreviewed can ride along.
 
@@ -115,7 +120,11 @@ The reviewer is instructed to end its output with a fenced JSON block:
 `verdict` is `"clean"` or `"findings"`. Only `blocking` findings drive the fix
 loop; `note` findings are recorded but do not block. An unparseable verdict is
 a failed turn: it consumes a `deterministicRetries` attempt, then halts — a
-gate that cannot read its measurement fails closed.
+gate that cannot read its measurement fails closed. Required fields
+(`severity`, `file`, `summary`) are strict — any violation rejects the
+verdict; malformed OPTIONAL fields (`line`, `detail`) are dropped from the
+finding rather than rejecting, so a stringly-typed line number can't brick
+the gate.
 
 `.tackle/review.md` is the human-readable record: one section per round —
 verdict, findings, fix-turn summary — so the human gate and later archaeology
@@ -141,14 +150,25 @@ phase's state — custody of the diff passes from build to review at the first
 fix turn. Round N's reviewer always reviews a diff whose hash review state
 recorded, and the review-passed hash in the commit chain is the final round's.
 
+Shipped refinement: the fix-round custody pin actually lives in
+`build.diffHash` (updated at each re-freeze) rather than in review state, so a
+killed loop can still resume — see the plan's "Design refinement" header for
+the reasoning.
+
 Mismatch halts: "`.tackle/specs.md` changed after approval; re-run specs (or
 re-approve)".
 
-**Accepted limitation, stated plainly:** `workflow.json` lives in the
-turn-writable workdir, so a hostile turn could rewrite the hashes too. v1
-defends against accident and drift, not a malicious author. Moving state to a
-turn-inaccessible source is the noted future hardening (SPEC already names
-it).
+**Accepted limitation, stated plainly:** `workflow.json` — and the rest of the
+turn-writable workdir, including `.git/` — lives outside a turn-inaccessible
+source, so a hostile turn could rewrite the hashes too. v1 defends against
+accident and drift, not a malicious author. Hooks are neutralized at commit
+time (see "The commit chain"); the rest of that surface is documented risk.
+Moving state to a turn-inaccessible source is the noted future hardening
+(SPEC already names it). The same boundary covers the stage window: a
+turn-spawned background process could mutate the tree in the instants between
+the pre-stage hash check and `git add`; closing it means committing the
+verified tree via plumbing (`write-tree`/`commit-tree`), which is the v2
+hardening.
 
 ## Policy and error handling
 

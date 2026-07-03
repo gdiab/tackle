@@ -3,11 +3,13 @@ import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { Command, InvalidArgumentError, Option } from "commander";
+import { ClaudeAdapter } from "./adapter/claude/index.js";
 import { CodexAdapter } from "./adapter/codex/index.js";
 import type { Adapter, Effort } from "./adapter/types.js";
 import { runPhase } from "./workflow/phase.js";
 import type { Presenter } from "./workflow/presenter.js";
 import { TerminalPresenter } from "./workflow/presenter.js";
+import { runReviewPhase } from "./workflow/review.js";
 import { readWorkflowState } from "./workflow/state.js";
 import { PHASE_ORDER, SPINE } from "./workflow/spine.js";
 import type { PhaseName } from "./workflow/types.js";
@@ -41,7 +43,12 @@ interface PhaseCliOptions {
 }
 
 export function buildProgram(
-  opts: { adapter?: Adapter; presenter?: Presenter; writeOut?: (s: string) => void } = {},
+  opts: {
+    adapter?: Adapter;
+    reviewerAdapter?: Adapter;
+    presenter?: Presenter;
+    writeOut?: (s: string) => void;
+  } = {},
 ): Command {
   const writeOut = opts.writeOut ?? ((s: string) => process.stdout.write(s));
   const program = new Command();
@@ -130,6 +137,26 @@ export function buildProgram(
     );
 
   withTurnOptions(
+    program
+      .command("review")
+      .description("Cross-model review of the frozen build diff; approval commits it"),
+  )
+    .option("--redo", "re-run review even if it already has a verdict")
+    .action(async (options: PhaseCliOptions) => {
+      const outcome = await runReviewPhase({
+        workdir: options.cwd,
+        reviewer: opts.reviewerAdapter ?? new ClaudeAdapter(),
+        author: opts.adapter ?? new CodexAdapter(),
+        presenter: opts.presenter ?? new TerminalPresenter(),
+        ...(options.redo === undefined ? {} : { redo: options.redo }),
+        effort: options.effort,
+        ...(options.model === undefined ? {} : { model: options.model }),
+        ...(options.timeout === undefined ? {} : { timeoutMs: options.timeout * 1000 }),
+      });
+      if (outcome !== "approved") process.exitCode = 1;
+    });
+
+  withTurnOptions(
     program.command("pr").description("Write the PR body to .tackle/pr.md from the build artifacts"),
   )
     .option("--redo", "re-run this phase even if it already has an artifact")
@@ -151,6 +178,8 @@ export function buildProgram(
         const status = state.phases[phase]?.status ?? "pending";
         writeOut(`${phase.padEnd(6)} ${status.padEnd(20)} ${SPINE[phase].artifact}\n`);
       }
+      const commit = state.phases.review?.commitSha;
+      if (commit !== undefined) writeOut(`commit ${commit.slice(0, 10)}\n`);
     });
 
   return program;

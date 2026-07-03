@@ -1,6 +1,6 @@
 import type { Authorship, BillingType, TurnStatus } from "../adapter/types.js";
 
-export type PhaseName = "specs" | "plan" | "build" | "pr";
+export type PhaseName = "specs" | "plan" | "build" | "review" | "pr";
 
 // Absent from WorkflowState.phases = not started. "halted" = a gate budget was
 // exhausted or the billing gate fired; re-runnable, kept for `tackle status`.
@@ -18,6 +18,16 @@ export interface TurnRecord {
 export interface PhaseState {
   status: PhaseStatus;
   lastTurn?: TurnRecord;
+  /** sha256 of the artifact file, pinned at approval time (SPEC artifact integrity). */
+  artifactHash?: string;
+  /** build only: sha256 of the currently frozen .tackle/build.diff (see design refinement). */
+  diffHash?: string;
+  /** review only: sha256 of the diff the reviewer passed; the commit chain's precondition. */
+  reviewedDiffHash?: string;
+  /** review only: the commit created on review approval. */
+  commitSha?: string;
+  /** review only: the escalation detail from the fix loop, re-surfaced when a pending gate is resumed. */
+  gateDetail?: string;
 }
 
 export interface WorkflowState {

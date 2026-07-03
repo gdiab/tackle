@@ -14,7 +14,7 @@ export interface PhaseDef {
   entryFlag: "--skip-specs" | "--trivial" | null;
 }
 
-export const PHASE_ORDER: PhaseName[] = ["specs", "plan", "build", "pr"];
+export const PHASE_ORDER: PhaseName[] = ["specs", "plan", "build", "review", "pr"];
 
 export const BUILD_DIFF_FILE = ".tackle/build.diff";
 
@@ -43,12 +43,23 @@ export const SPINE: Record<PhaseName, PhaseDef> = {
     predecessor: "plan",
     entryFlag: "--trivial",
   },
+  review: {
+    name: "review",
+    artifact: ".tackle/review.md",
+    // unused by the review runner (review never asks clarifying questions);
+    // present because PhaseDef requires it and the invalidation loop removes it.
+    questionsFile: ".tackle/review-questions.md",
+    // the review runner assembles its own inputs (frozen diff + spec), so none here
+    inputs: [],
+    predecessor: "build",
+    entryFlag: null,
+  },
   pr: {
     name: "pr",
     artifact: ".tackle/pr.md",
     questionsFile: ".tackle/pr-questions.md",
     inputs: ["specs", "build"],
-    predecessor: "build",
+    predecessor: "review",
     entryFlag: null,
   },
 };

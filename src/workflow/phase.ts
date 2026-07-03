@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Adapter, Effort, TurnResult } from "../adapter/types.js";
 import { readArtifact, removeArtifact } from "./artifacts.js";
+import { sha256 } from "./hash.js";
 import type { Presenter } from "./presenter.js";
 import { buildPhasePrompt } from "./prompts.js";
 import { BUILD_DIFF_FILE, effectivePredecessor, PHASE_ORDER, SPINE } from "./spine.js";
@@ -27,7 +28,7 @@ export interface RunPhaseOptions {
   timeoutMs?: number;
 }
 
-function toTurnRecord(result: TurnResult): TurnRecord {
+export function toTurnRecord(result: TurnResult): TurnRecord {
   return {
     status: result.status,
     summary: result.summary,
@@ -43,7 +44,7 @@ function toTurnRecord(result: TurnResult): TurnRecord {
  * Serves both the end-of-phase gate and resume: a pending gate from an earlier
  * (possibly killed) run is re-presented by the next command that needs it.
  */
-async function presentGate(
+export async function presentGate(
   phase: PhaseName,
   state: WorkflowState,
   opts: Pick<RunPhaseOptions, "workdir" | "presenter">,
@@ -51,6 +52,13 @@ async function presentGate(
   const def = SPINE[phase];
   const phaseState = state.phases[phase];
   if (phaseState === undefined) throw new Error(`no ${phase} state to present`);
+  const artifact = await readArtifact(opts.workdir, def.artifact);
+  if (artifact === null) {
+    opts.presenter.inform(
+      `${def.artifact} is missing or blank; cannot present the ${phase} gate — re-run \`tackle ${phase} --redo\``,
+    );
+    return false;
+  }
   const approved = await opts.presenter.askApproval({
     title: `${phase} phase awaiting approval`,
     artifactPath: def.artifact,
@@ -59,12 +67,22 @@ async function presentGate(
   });
   if (approved) {
     phaseState.status = "approved";
+    // Pin what was approved: later consumers verify against these hashes so a
+    // subsequent turn cannot silently rewrite an already-approved artifact.
+    phaseState.artifactHash = sha256(artifact);
+    if (phase === "build") {
+      const diff = await readArtifact(opts.workdir, BUILD_DIFF_FILE);
+      if (diff !== null) phaseState.diffHash = sha256(diff);
+    }
     await writeWorkflowState(opts.workdir, state);
   }
   return approved;
 }
 
 export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
+  if (opts.phase === "review") {
+    throw new Error("the review phase runs through runReviewPhase, not runPhase");
+  }
   const def = SPINE[opts.phase];
   const { presenter, workdir } = opts;
   let state = await readWorkflowState(workdir);
@@ -124,6 +142,10 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
       return "halted";
     }
     if (predState.status === "awaiting_approval") {
+      if (pred === "review") {
+        presenter.inform(`review is awaiting approval; run \`tackle review\` to approve and commit`);
+        return "halted";
+      }
       const ok = await presentGate(pred, state, opts);
       if (!ok) return "rejected";
     }
@@ -178,9 +200,28 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
   const questionsAndAnswers = (await readArtifact(workdir, def.questionsFile)) ?? undefined;
   const inputs: Array<{ name: string; path: string; content: string }> = [];
   for (const inputPhase of def.inputs) {
-    // Missing inputs are phases skipped by the entry point, not errors.
     const content = await readArtifact(workdir, SPINE[inputPhase].artifact);
-    if (content !== null) inputs.push({ name: inputPhase, path: SPINE[inputPhase].artifact, content });
+    const pinned = state.phases[inputPhase]?.artifactHash;
+    if (content === null) {
+      // Missing inputs are phases skipped by the entry point — but an approved
+      // phase pinned a non-blank artifact, so pin-present + missing/blank = tamper.
+      if (pinned !== undefined) {
+        presenter.inform(
+          `${SPINE[inputPhase].artifact} is missing or blank but ${inputPhase} was approved; ` +
+            `re-run \`tackle ${inputPhase} --redo\` to regenerate and re-approve it`,
+        );
+        return "halted";
+      }
+      continue;
+    }
+    if (pinned !== undefined && sha256(content) !== pinned) {
+      presenter.inform(
+        `${SPINE[inputPhase].artifact} changed after ${inputPhase} was approved; ` +
+          `re-run \`tackle ${inputPhase} --redo\` to regenerate and re-approve it`,
+      );
+      return "halted";
+    }
+    inputs.push({ name: inputPhase, path: SPINE[inputPhase].artifact, content });
   }
 
   // -- the turn loop under the deterministic-gate policy ------------------------
@@ -214,7 +255,7 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
         result.usage.billingType === "metered"
           ? "halted: turn billed metered; fix adapter auth before re-running (subscription-before-API gate)"
           : "halted: could not verify subscription billing (billing type unknown); refusing to proceed " +
-              "— check the adapter's auth (e.g. ~/.codex/auth.json)",
+              "— check the adapter's credentials (Claude Code login, or ~/.codex/auth.json for codex)",
       );
       return "halted";
     }

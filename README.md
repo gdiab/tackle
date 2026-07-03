@@ -24,6 +24,7 @@ under `.tackle/`, and stops at a blocking approval prompt. State lives in
     tackle specs "add a widget"     # writes .tackle/specs.md, asks for approval
     tackle plan                     # writes .tackle/plan.md from the approved specs
     tackle build                    # implements the plan; freezes .tackle/build.diff
+    tackle review                   # cross-model review of the frozen diff; approval commits
     tackle pr                       # writes the PR body to .tackle/pr.md
     tackle status                   # where the workflow stands
 
@@ -35,4 +36,12 @@ If a phase's input is too vague, the agent writes questions to
 Gate budgets (`deterministicRetries`, `reviewLoopIterations`, `circuitBreakerThreshold`)
 are config in `.tackle/config.json`, not constants.
 
-Status: workflow spine landed (specs → plan → build → pr), phase-gated and resumable.
+The review phase is the pre-commit gate: a different runtime than authored the
+change (Claude Code reviews Codex builds) reviews the frozen diff against the
+spec, findings loop back through author fix turns (bounded, circuit-broken),
+and on human approval tackle commits — but only if the staged content hashes to
+exactly what the reviewer passed. Nothing unreviewed can ride along; approved
+artifacts are hash-pinned so later turns can't silently rewrite them.
+
+Status: workflow spine landed (specs → plan → build → review → pr), phase-gated,
+resumable, with the cross-model pre-commit review gate live.
