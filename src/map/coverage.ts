@@ -37,6 +37,8 @@ export function createVitestCoverageRunner(
     async run(testFileRel) {
       const reportsDir = await mkdtemp(join(tmpdir(), "tackle-cov-"));
       try {
+        // `bin` is the shell-script shim under node_modules/.bin — spawning
+        // it directly assumes POSIX; Windows would need `.cmd` resolution.
         const result = await runCommand({
           cmd: bin,
           args: [

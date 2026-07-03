@@ -10,6 +10,7 @@ import { buildMap } from "./map/builder.js";
 import { createVitestCoverageRunner } from "./map/coverage.js";
 import { describeMap, testsFor } from "./map/query.js";
 import { readTestMap, TEST_MAP_FILE, writeTestMap } from "./map/store.js";
+import type { TestMapFile } from "./map/types.js";
 import { runPhase } from "./workflow/phase.js";
 import type { Presenter } from "./workflow/presenter.js";
 import { TerminalPresenter } from "./workflow/presenter.js";
@@ -55,7 +56,13 @@ function registerMapCommands(program: Command, writeOut: (s: string) => void): v
     .option("--cwd <dir>", "working directory", process.cwd())
     .option("--no-coverage", "skip per-test coverage runs (static import graph only)")
     .action(async (options: { cwd: string; coverage: boolean }) => {
-      const previous = await readTestMap(options.cwd);
+      let previous: TestMapFile | null;
+      try {
+        previous = await readTestMap(options.cwd);
+      } catch {
+        writeOut("warning: existing test map is unreadable; rebuilding from scratch\n");
+        previous = null;
+      }
       const runner = options.coverage ? createVitestCoverageRunner(options.cwd) : null;
       if (options.coverage && runner === null) {
         writeOut("warning: vitest not found from the working directory; building a static-only map\n");

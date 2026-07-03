@@ -83,4 +83,35 @@ describe("buildMap", () => {
     expect(map.mode).toBe("static-only");
     expect(map.tests["test/a.test.ts"]?.sources).toEqual({ "src/a.ts": "static" });
   });
+
+  it("re-runs coverage for hash-unchanged entries when the previous map was static-only", async () => {
+    const dir = await tinyRepo();
+    const staticOnly = await buildMap({ workdir: dir, runner: null, previous: null });
+    expect(staticOnly.mode).toBe("static-only");
+    expect(staticOnly.tests["test/a.test.ts"]?.sources).toEqual({ "src/a.ts": "static" });
+
+    const runner = countingRunner({ sources: ["src/a.ts", "src/b.ts"] });
+    const map = await buildMap({ workdir: dir, runner, previous: staticOnly });
+    // Hash is unchanged, but a static-only previous map has no coverage
+    // evidence to inherit — the runner must actually run.
+    expect(runner.calls).toEqual(["test/a.test.ts"]);
+    expect(map.mode).toBe("full");
+    expect(map.tests["test/a.test.ts"]?.sources).toEqual({
+      "src/a.ts": "both",
+      "src/b.ts": "coverage",
+    });
+  });
+
+  it("retries a previously failed coverage run instead of reusing the error forever", async () => {
+    const dir = await tinyRepo();
+    const failing = countingRunner({ error: "boom" });
+    const map1 = await buildMap({ workdir: dir, runner: failing, previous: null });
+    expect(map1.tests["test/a.test.ts"]?.coverageError).toBe("boom");
+
+    const succeeding = countingRunner({ sources: ["src/a.ts"] });
+    const map2 = await buildMap({ workdir: dir, runner: succeeding, previous: map1 });
+    expect(succeeding.calls).toEqual(["test/a.test.ts"]); // retried, not reused
+    expect(map2.tests["test/a.test.ts"]?.coverageError).toBeUndefined();
+    expect(map2.tests["test/a.test.ts"]?.sources).toEqual({ "src/a.ts": "both" });
+  });
 });

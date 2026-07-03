@@ -48,14 +48,14 @@ export function createImportWalker(workdir: string): ImportWalker {
     sourcesFor(testFileRel: string): string[] {
       const start = resolve(root, testFileRel);
       const visited = new Set<string>([start]);
-      const queue = [start];
+      const stack = [start];
       for (;;) {
-        const file = queue.pop();
+        const file = stack.pop();
         if (file === undefined) break;
         for (const dep of importsOf(file)) {
           if (visited.has(dep)) continue;
           visited.add(dep);
-          queue.push(dep);
+          stack.push(dep);
         }
       }
       const sources: string[] = [];

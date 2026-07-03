@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,5 +81,18 @@ describe("tackle map", () => {
     expect(code).toBeUndefined();
     expect(out).toContain("warning: vitest not found");
     expect(out).toContain("static-only");
+  });
+
+  it("build rebuilds from scratch with a warning when the existing test map is corrupt", async () => {
+    const dir = await fixtureCopy();
+    await mkdir(join(dir, ".tackle"), { recursive: true });
+    await writeFile(join(dir, TEST_MAP_FILE), "not valid json{{{");
+    const { out, code } = await runCli(["map", "build", "--no-coverage", "--cwd", dir]);
+    expect(code).toBeUndefined();
+    expect(out).toContain("warning: existing test map is unreadable; rebuilding from scratch");
+    expect(out).toContain("static-only");
+    const written = JSON.parse(await readFile(join(dir, TEST_MAP_FILE), "utf8"));
+    expect(written.version).toBe(1);
+    expect(written.mode).toBe("static-only");
   });
 });
