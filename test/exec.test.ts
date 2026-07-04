@@ -114,7 +114,7 @@ describe("runCommand", () => {
     expect(result.timedOut).toBe(true);
 
     const grandchildPid = Number(result.stdout.trim());
-    expect(Number.isInteger(grandchildPid)).toBe(true);
+    expect(Number.isInteger(grandchildPid) && grandchildPid > 0).toBe(true);
 
     try {
       const deadline = Date.now() + 5_000;
@@ -130,10 +130,12 @@ describe("runCommand", () => {
       }
       expect(dead).toBe(true);
     } finally {
-      try {
-        process.kill(grandchildPid, "SIGKILL");
-      } catch {
-        // already dead, which is the point of this test
+      if (grandchildPid > 0) {
+        try {
+          process.kill(grandchildPid, "SIGKILL");
+        } catch {
+          // already dead, which is the point of this test
+        }
       }
     }
   });
