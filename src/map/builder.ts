@@ -38,8 +38,8 @@ export async function buildMap(opts: BuildMapOptions): Promise<TestMapFile> {
   const tests: Record<string, TestEntry> = {};
   // A static-only previous map carries no coverage evidence. If this build
   // has a runner, treat that previous map as absent entirely — coarse, but
-  // honest — so every entry gets a real coverage run rather than being
-  // reused wholesale under a "full" mode that never actually ran coverage.
+  // honest — so every entry gets a real coverage run rather than inheriting
+  // coverage evidence under a "full" mode that never actually ran coverage.
   // The inverse (a static-only rebuild reusing a full previous map's
   // entries) still reuses below: that keeps richer data than a static-only
   // rebuild could produce on its own.
@@ -48,17 +48,32 @@ export async function buildMap(opts: BuildMapOptions): Promise<TestMapFile> {
     const content = await readFile(join(opts.workdir, testFile), "utf8");
     const hash = sha256(content);
     const prev = previous?.tests[testFile];
-    // Hash-unchanged entries are reused wholesale, except a coverage run
-    // that previously failed is retried (not reused forever) whenever a
-    // runner is available.
-    if (prev !== undefined && prev.hash === hash && !(opts.runner !== null && prev.coverageError !== undefined)) {
-      tests[testFile] = prev;
-      continue;
-    }
+
+    // Static edges are always recomputed: the walk is cheap, and reusing a
+    // prior test file's entry wholesale would miss changes in a helper it
+    // transitively imports (the test file itself can be hash-unchanged
+    // while a file it reaches through an import chain is not).
     const sources: Record<string, EdgeMethod> = {};
     for (const source of walker.sourcesFor(testFile)) sources[source] = "static";
     const entry: TestEntry = { hash, sources };
-    if (opts.runner !== null) {
+
+    // A coverage run that previously failed is retried (not reused forever)
+    // whenever a runner is available.
+    const retryNeeded = opts.runner !== null && prev?.coverageError !== undefined;
+    if (prev !== undefined && prev.hash === hash && !retryNeeded) {
+      // Test file unchanged: reuse coverage evidence, merged onto the fresh
+      // static set above, without re-running coverage.
+      for (const [source, method] of Object.entries(prev.sources)) {
+        if (method === "coverage" || method === "both") {
+          sources[source] = sources[source] === "static" ? "both" : "coverage";
+        }
+      }
+      if (prev.coverageError !== undefined && opts.runner === null) {
+        // A static-only rebuild can't retry a failed coverage run — carry
+        // the error forward rather than silently dropping it.
+        entry.coverageError = prev.coverageError;
+      }
+    } else if (opts.runner !== null) {
       log(`coverage: ${testFile}`);
       const result = await opts.runner.run(testFile);
       if ("error" in result) {

@@ -114,4 +114,79 @@ describe("buildMap", () => {
     expect(map2.tests["test/a.test.ts"]?.coverageError).toBeUndefined();
     expect(map2.tests["test/a.test.ts"]?.sources).toEqual({ "src/a.ts": "both" });
   });
+
+  it("recomputes static edges when a transitively imported helper gains an import", async () => {
+    const dir = await tinyRepo();
+    await writeFile(join(dir, "test", "helper.ts"), "export const h = 1;\n");
+    await writeFile(
+      join(dir, "test", "a.test.ts"),
+      'import { a } from "../src/a";\nimport { h } from "./helper";\nexport const x = a + h;\n',
+    );
+    const map1 = await buildMap({ workdir: dir, runner: null, previous: null });
+    expect(map1.tests["test/a.test.ts"]?.sources).toEqual({
+      "src/a.ts": "static",
+      "test/helper.ts": "static",
+    });
+
+    // helper.ts gains an import of src/b.ts; a.test.ts itself is unchanged.
+    await writeFile(join(dir, "test", "helper.ts"), 'import { b } from "../src/b";\nexport const h = b;\n');
+    const map2 = await buildMap({ workdir: dir, runner: null, previous: map1 });
+    expect(map2.tests["test/a.test.ts"]?.sources).toEqual({
+      "src/a.ts": "static",
+      "test/helper.ts": "static",
+      "src/b.ts": "static",
+    });
+  });
+
+  it("recomputes static edges when a transitively imported helper loses an import", async () => {
+    const dir = await tinyRepo();
+    await writeFile(join(dir, "test", "helper.ts"), 'import { b } from "../src/b";\nexport const h = b;\n');
+    await writeFile(
+      join(dir, "test", "a.test.ts"),
+      'import { a } from "../src/a";\nimport { h } from "./helper";\nexport const x = a + h;\n',
+    );
+    const map1 = await buildMap({ workdir: dir, runner: null, previous: null });
+    expect(map1.tests["test/a.test.ts"]?.sources).toEqual({
+      "src/a.ts": "static",
+      "test/helper.ts": "static",
+      "src/b.ts": "static",
+    });
+
+    // helper.ts loses its import of src/b.ts; a.test.ts itself is unchanged.
+    await writeFile(join(dir, "test", "helper.ts"), "export const h = 1;\n");
+    const map2 = await buildMap({ workdir: dir, runner: null, previous: map1 });
+    expect(map2.tests["test/a.test.ts"]?.sources).toEqual({
+      "src/a.ts": "static",
+      "test/helper.ts": "static",
+    });
+  });
+
+  it("reuses coverage evidence across a static recompute without invoking the runner", async () => {
+    const dir = await tinyRepo();
+    const first = countingRunner({ sources: ["src/a.ts", "src/b.ts"] });
+    const map1 = await buildMap({ workdir: dir, runner: first, previous: null });
+    expect(map1.tests["test/a.test.ts"]?.sources).toEqual({
+      "src/a.ts": "both", // static AND coverage
+      "src/b.ts": "coverage", // coverage only
+    });
+
+    const second = countingRunner({ sources: ["src/a.ts", "src/b.ts"] });
+    const map2 = await buildMap({ workdir: dir, runner: second, previous: map1 });
+    expect(second.calls).toEqual([]); // hash unchanged => coverage evidence reused, runner not called
+    expect(map2.tests["test/a.test.ts"]?.sources).toEqual({
+      "src/a.ts": "both",
+      "src/b.ts": "coverage",
+    });
+  });
+
+  it("carries a coverageError forward on a static-only rebuild when the hash is unchanged", async () => {
+    const dir = await tinyRepo();
+    const map1 = await buildMap({ workdir: dir, runner: countingRunner({ error: "boom" }), previous: null });
+    expect(map1.tests["test/a.test.ts"]?.coverageError).toBe("boom");
+
+    const map2 = await buildMap({ workdir: dir, runner: null, previous: map1 });
+    expect(map2.mode).toBe("static-only");
+    expect(map2.tests["test/a.test.ts"]?.coverageError).toBe("boom");
+    expect(map2.tests["test/a.test.ts"]?.sources).toEqual({ "src/a.ts": "static" });
+  });
 });

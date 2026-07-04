@@ -57,14 +57,14 @@ New `src/map/` directory, one concern per file, matching the existing style:
   compiler API). `typescript` moves from devDependencies to dependencies.
 - `coverage.ts` — the per-test-file coverage runner behind a small interface
   (vitest is the only v1 implementation) so jest can slot in later.
-- `builder.ts` — orchestration and incrementality: discover, diff against the
-  cached map by content hash, rebuild only changed/new entries, drop deleted
-  ones, merge edges with provenance. Known v1 approximation: staleness is
-  keyed on test-file hashes only, so editing a *source* file does not
-  invalidate entries whose coverage may have shifted. Accepted because the
-  map's consumer treats it as guidance, not proof; `map build` re-runs
-  cheaply and `map status` shows map age. Revisit if telemetry shows stale
-  edges misleading builds.
+- `builder.ts` — orchestration and incrementality: discover, recompute static
+  edges for every test file on every build (the walk is cheap — no type
+  checking), drop deleted entries, merge edges with provenance.
+  Hash-based reuse applies only to coverage evidence: when a test file's
+  hash is unchanged, its previous coverage-derived edges are merged onto the
+  freshly computed static set instead of re-running coverage, so a test file
+  unchanged but whose transitively imported helper changed still gets
+  correct static edges without paying for a coverage re-run.
 - `store.ts` — read/write `.tackle/test-map.json`: versioned (`version: 1`),
   atomic write via tmp+rename, same validation posture as
   `workflow/state.ts`. Holds per-test-file records (hash, sources, method,

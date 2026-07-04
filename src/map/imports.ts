@@ -26,12 +26,20 @@ function loadCompilerOptions(workdir: string): ts.CompilerOptions {
 export function createImportWalker(workdir: string): ImportWalker {
   const root = resolve(workdir);
   const options = loadCompilerOptions(root);
+  // Every build now walks every test file, so shared helpers get re-read/
+  // re-parsed once per test file that reaches them without this memo. The
+  // walker is created once per build, so the cache's lifetime is exactly one
+  // build — no staleness concern.
+  const cache = new Map<string, string[]>();
 
   function importsOf(absFile: string): string[] {
+    const cached = cache.get(absFile);
+    if (cached !== undefined) return cached;
     let content: string;
     try {
       content = readFileSync(absFile, "utf8");
     } catch {
+      cache.set(absFile, []);
       return [];
     }
     const resolved: string[] = [];
@@ -41,6 +49,7 @@ export function createImportWalker(workdir: string): ImportWalker {
       if (mod.resolvedFileName.includes(`${sep}node_modules${sep}`)) continue;
       resolved.push(resolve(mod.resolvedFileName));
     }
+    cache.set(absFile, resolved);
     return resolved;
   }
 
