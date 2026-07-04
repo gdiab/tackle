@@ -27,7 +27,7 @@ export function buildAdapterEnv(opts: {
     if (banned.has(key)) {
       throw new AdapterEnvError(`banned env key in extra: ${key}`);
     }
-    if (key in env) {
+    if (Object.hasOwn(env, key)) {
       throw new AdapterEnvError(`extra env key collides with allowlisted base key: ${key}`);
     }
     env[key] = value;
