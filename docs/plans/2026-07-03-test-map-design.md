@@ -60,11 +60,13 @@ New `src/map/` directory, one concern per file, matching the existing style:
 - `builder.ts` — orchestration and incrementality: discover, recompute static
   edges for every test file on every build (the walk is cheap — no type
   checking), drop deleted entries, merge edges with provenance.
-  Hash-based reuse applies only to coverage evidence: when a test file's
-  hash is unchanged, its previous coverage-derived edges are merged onto the
-  freshly computed static set instead of re-running coverage, so a test file
-  unchanged but whose transitively imported helper changed still gets
-  correct static edges without paying for a coverage re-run.
+  Hash-based reuse applies only to coverage evidence, and only when the
+  static dependency set is unchanged too: when a test file's hash *and* its
+  previous static edge set are both unchanged, its previous coverage-derived
+  edges are merged onto the freshly computed static set instead of
+  re-running coverage. If the static set differs — a transitively imported
+  helper gained or lost an import — the coverage evidence is stale and is
+  not reused; a coverage run happens instead when a runner is available.
 - `store.ts` — read/write `.tackle/test-map.json`: versioned (`version: 1`),
   atomic write via tmp+rename, same validation posture as
   `workflow/state.ts`. Holds per-test-file records (hash, sources, method,
