@@ -100,8 +100,17 @@ export async function runCommand(opts: {
 
     child.on("close", settle);
 
-    // EPIPE from a fast-exiting child is expected; the outcome is captured by the exit code
-    child.stdin.on("error", () => {});
+    // EPIPE from a fast-exiting child is expected; the outcome is captured by the
+    // exit code. Any other stdin error is unexpected and rejects the turn (the
+    // settled guard keeps this from double-settling against a later exit/close).
+    child.stdin.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EPIPE") return;
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
+      reject(err);
+    });
     if (opts.stdin !== undefined) {
       child.stdin.write(opts.stdin);
     }
