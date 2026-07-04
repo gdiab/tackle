@@ -57,9 +57,19 @@ export function createVitestCoverageRunner(
           const tail = (result.stderr || result.stdout).trim().split("\n").slice(-5).join("\n");
           return { error: `no coverage output (exit ${result.exitCode}): ${tail}` };
         };
+        if (result.timedOut) return { error: "coverage run timed out" };
+        if (result.exitCode !== 0) {
+          // `--coverage.reportOnFailure` can still leave a coverage-final.json behind
+          // for a failing (or killed) run. That file reflects whatever partially
+          // executed before the failure, not a trustworthy record of what the test
+          // exercises — a red test must not get treated as clean evidence. It falls
+          // back to static-only edges (via coverageError on the entry) until it
+          // passes, and the builder's coverageError-retry re-runs it on the next build.
+          const tail = (result.stderr || result.stdout).trim().split("\n").slice(-5).join("\n");
+          return { error: `coverage run failed (exit ${result.exitCode}): ${tail}` };
+        }
         const finalPath = join(reportsDir, "coverage-final.json");
         if (!existsSync(finalPath)) {
-          if (result.timedOut) return { error: "coverage run timed out" };
           return noCoverageError();
         }
         let parsed: Record<string, IstanbulFileCoverage>;

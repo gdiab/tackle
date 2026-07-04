@@ -23,6 +23,13 @@ export async function readTestMap(workdir: string): Promise<TestMapFile | null> 
   }
   const map = parsed as TestMapFile;
   if (map.version !== 1) throw new Error(`unsupported ${TEST_MAP_FILE} version; expected 1`);
+  const isPlainObject = (value: unknown): boolean =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  if (!isPlainObject(map.tests) || !isPlainObject(map.sources)) {
+    throw new Error(
+      `${TEST_MAP_FILE} is missing its tests/sources structure; delete it and re-run \`tackle map build\``,
+    );
+  }
   return map;
 }
 

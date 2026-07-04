@@ -36,4 +36,11 @@ describe("createVitestCoverageRunner", () => {
     const result = await runner!.run("missing.test.ts");
     expect(result).toHaveProperty("error");
   });
+
+  it("reports an error for a failing run instead of consuming its coverage", { timeout: 120_000 }, async () => {
+    const runner = createVitestCoverageRunner(fixture);
+    const result = await runner!.run("fail.test.ts");
+    expect(result).toHaveProperty("error");
+    expect((result as { error: string }).error).toMatch(/exit \d+/);
+  });
 });

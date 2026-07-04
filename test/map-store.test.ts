@@ -54,4 +54,11 @@ describe("test-map store", () => {
     await writeFile(join(dir, TEST_MAP_FILE), JSON.stringify({ version: 2 }));
     await expect(readTestMap(dir)).rejects.toThrow(/version/);
   });
+
+  it("rejects a hollow map missing tests/sources", async () => {
+    const dir = await tempDir();
+    await mkdir(join(dir, ".tackle"), { recursive: true });
+    await writeFile(join(dir, TEST_MAP_FILE), JSON.stringify({ version: 1 }));
+    await expect(readTestMap(dir)).rejects.toThrow(/tackle map build/);
+  });
 });
