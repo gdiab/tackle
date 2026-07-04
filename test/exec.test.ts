@@ -99,4 +99,44 @@ describe("runCommand", () => {
     expect(result.timedOut).toBe(true);
     expect(Date.now() - start).toBeLessThan(5_000);
   });
+
+  it("kills the grandchild too when the child times out", async () => {
+    const result = await runCommand({
+      cmd: process.execPath,
+      args: [
+        "-e",
+        `const gc = require("child_process").spawn("sleep", ["30"], { stdio: "inherit" }); console.log(gc.pid); setTimeout(() => {}, 60_000);`,
+      ],
+      cwd: process.cwd(),
+      env: nodeEnv,
+      timeoutMs: 500,
+    });
+    expect(result.timedOut).toBe(true);
+
+    const grandchildPid = Number(result.stdout.trim());
+    expect(Number.isInteger(grandchildPid) && grandchildPid > 0).toBe(true);
+
+    try {
+      const deadline = Date.now() + 5_000;
+      let dead = false;
+      while (Date.now() < deadline) {
+        try {
+          process.kill(grandchildPid, 0);
+          await new Promise((r) => setTimeout(r, 100));
+        } catch {
+          dead = true;
+          break;
+        }
+      }
+      expect(dead).toBe(true);
+    } finally {
+      if (grandchildPid > 0) {
+        try {
+          process.kill(grandchildPid, "SIGKILL");
+        } catch {
+          // already dead, which is the point of this test
+        }
+      }
+    }
+  });
 });

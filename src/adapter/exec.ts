@@ -23,6 +23,10 @@ export async function runCommand(opts: {
       cwd: opts.cwd,
       env: opts.env,
       stdio: ["pipe", "pipe", "pipe"],
+      // Make the child the leader of its own process group (pgid === pid) so a
+      // timeout can kill the whole tree, not just the direct child. We always
+      // await this child, so it is never unref'd.
+      detached: true,
     });
 
     let stdout = "";
@@ -31,7 +35,20 @@ export async function runCommand(opts: {
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      // Kill the entire process group so grandchildren (e.g. a vitest worker
+      // spawned by the child) die too, instead of surviving and holding
+      // stdio/files open. Falls back to killing just the child if there is no
+      // pid (spawn failure) or the group is already gone (ESRCH) / unsupported
+      // (non-POSIX platforms).
+      if (child.pid === undefined) {
+        child.kill("SIGKILL");
+      } else {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          child.kill("SIGKILL");
+        }
+      }
     }, opts.timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => {
