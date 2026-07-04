@@ -8,6 +8,61 @@ export interface ExecResult {
   stderr: string;
 }
 
+// Process groups (pgid === child pid, thanks to detached: true) for spawns
+// currently in flight. Entries are added right after a successful spawn and
+// removed at every settle/reject choke point below, so the set can never
+// leak a pid past the lifetime of its runCommand() call.
+const activeGroups = new Set<number>();
+// Tracks which signals (SIGINT, SIGTERM) have handlers currently installed.
+// Per-signal tracking allows recovery if a signal is re-raised and the process
+// survives (e.g., due to another listener); the next runCommand will detect
+// the signal is no longer installed and re-arm it.
+const installedSignals = new Set<string>();
+
+/**
+ * Send `signal` to every tracked child's process group. Called by the
+ * lazily-installed SIGINT/SIGTERM handlers below, and exported so tests can
+ * exercise the forwarding behavior directly without signaling the test
+ * runner's own process.
+ */
+export function killActiveGroups(signal: NodeJS.Signals): void {
+  for (const pid of activeGroups) {
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      // Group already gone; nothing to forward to.
+    }
+  }
+}
+
+/** Number of process groups currently tracked. Exported for test assertions. */
+export function activeGroupCount(): number {
+  return activeGroups.size;
+}
+
+// Installed lazily (on first spawn) rather than at module load so importing
+// exec.ts never has the side effect of touching process-global signal
+// listeners.
+function installSignalForwarding(): void {
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    if (installedSignals.has(sig)) continue;
+    installedSignals.add(sig);
+    const handler = () => {
+      killActiveGroups(sig);
+      // Restore default disposition and re-raise so the process still exits
+      // with the conventional signal status. Without this, installing a
+      // listener would swallow the signal and keep tackle alive.
+      process.removeListener(sig, handler);
+      // Mark the signal as no longer installed so that if the process survives
+      // the re-raise (due to another listener), the next runCommand will
+      // re-install forwarding for this signal.
+      installedSignals.delete(sig);
+      process.kill(process.pid, sig);
+    };
+    process.on(sig, handler);
+  }
+}
+
 export async function runCommand(opts: {
   cmd: string;
   args: string[];
@@ -18,6 +73,7 @@ export async function runCommand(opts: {
   streamGraceMs?: number;
   onLine?: (line: string) => void;
 }): Promise<ExecResult> {
+  installSignalForwarding();
   return new Promise((resolve, reject) => {
     const child = spawn(opts.cmd, opts.args, {
       cwd: opts.cwd,
@@ -28,6 +84,13 @@ export async function runCommand(opts: {
       // await this child, so it is never unref'd.
       detached: true,
     });
+
+    if (child.pid !== undefined) {
+      activeGroups.add(child.pid);
+    }
+    const untrackGroup = () => {
+      if (child.pid !== undefined) activeGroups.delete(child.pid);
+    };
 
     let stdout = "";
     let stderr = "";
@@ -70,6 +133,7 @@ export async function runCommand(opts: {
     const settle = () => {
       if (settled) return;
       settled = true;
+      untrackGroup();
       clearTimeout(timer);
       if (graceTimer) clearTimeout(graceTimer);
       resolve({ exitCode, timedOut, stdout, stderr });
@@ -78,6 +142,7 @@ export async function runCommand(opts: {
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
+      untrackGroup();
       clearTimeout(timer);
       if (graceTimer) clearTimeout(graceTimer);
       reject(err);
@@ -107,6 +172,7 @@ export async function runCommand(opts: {
       if (err.code === "EPIPE") return;
       if (settled) return;
       settled = true;
+      untrackGroup();
       clearTimeout(timer);
       if (graceTimer) clearTimeout(graceTimer);
       reject(err);
