@@ -47,6 +47,14 @@ describe("workdir diff", () => {
     expect(diff).toContain("+fresh");
   });
 
+  it("captures an empty untracked file as a new-file diff", async () => {
+    const dir = makeRepo();
+    const base = await resolveHead(dir);
+    writeFileSync(join(dir, "empty.txt"), "");
+    const diff = await captureWorkdirDiff(dir, base);
+    expect(diff).toContain("empty.txt");
+  });
+
   it("captures untracked files with non-ASCII names", async () => {
     const dir = makeRepo();
     const base = await resolveHead(dir);
