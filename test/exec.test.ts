@@ -1,7 +1,29 @@
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { runCommand } from "../src/adapter/exec.js";
+import { activeGroupCount, killActiveGroups, runCommand } from "../src/adapter/exec.js";
 
 const nodeEnv = { PATH: process.env.PATH ?? "" };
+
+async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+async function waitForDeath(pid: number, timeoutMs = 5_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+      await new Promise((r) => setTimeout(r, 100));
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
 
 describe("runCommand", () => {
   it("captures exit code, stdout, and per-line callbacks", async () => {
@@ -135,6 +157,139 @@ describe("runCommand", () => {
           process.kill(grandchildPid, "SIGKILL");
         } catch {
           // already dead, which is the point of this test
+        }
+      }
+    }
+  });
+
+  it("killActiveGroups forwards a signal to a hanging child's whole process group, reaching grandchildren", async () => {
+    let childPid = -1;
+    let grandchildPid = -1;
+
+    const resultPromise = runCommand({
+      cmd: process.execPath,
+      args: [
+        "-e",
+        `console.log("child:" + process.pid); const gc = require("child_process").spawn("sleep", ["30"], { stdio: "inherit" }); console.log("grandchild:" + gc.pid); setTimeout(() => {}, 60_000);`,
+      ],
+      cwd: process.cwd(),
+      env: nodeEnv,
+      timeoutMs: 20_000,
+      onLine: (line) => {
+        if (line.startsWith("child:")) childPid = Number(line.slice("child:".length));
+        if (line.startsWith("grandchild:")) grandchildPid = Number(line.slice("grandchild:".length));
+      },
+    });
+
+    await waitFor(() => grandchildPid !== -1);
+    expect(Number.isInteger(childPid) && childPid > 0).toBe(true);
+    expect(Number.isInteger(grandchildPid) && grandchildPid > 0).toBe(true);
+
+    killActiveGroups("SIGTERM");
+
+    try {
+      const result = await resultPromise;
+      expect(result.timedOut).toBe(false);
+      expect(result.exitCode).toBeNull();
+
+      expect(await waitForDeath(childPid)).toBe(true);
+      expect(await waitForDeath(grandchildPid)).toBe(true);
+    } finally {
+      for (const pid of [childPid, grandchildPid]) {
+        if (pid > 0) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // already dead, which is the point of this test
+          }
+        }
+      }
+    }
+  });
+
+  it("clears the active-group registry on normal exit, so killActiveGroups is a no-op afterward", async () => {
+    expect(activeGroupCount()).toBe(0);
+
+    await runCommand({
+      cmd: process.execPath,
+      args: ["-e", "process.exit(0)"],
+      cwd: process.cwd(),
+      env: nodeEnv,
+      timeoutMs: 10_000,
+    });
+
+    expect(activeGroupCount()).toBe(0);
+
+    // Sentinel: an unrelated long-lived process that exec.ts never tracked.
+    // If killActiveGroups had a stale/leaked registry entry, sending a signal
+    // here would risk hitting an unrelated pid; assert the sentinel survives.
+    const sentinel = spawn("sleep", ["5"], { detached: true });
+    try {
+      killActiveGroups("SIGTERM");
+      await new Promise((r) => setTimeout(r, 200));
+      expect(sentinel.exitCode).toBeNull();
+    } finally {
+      if (sentinel.pid !== undefined) {
+        try {
+          process.kill(-sentinel.pid, "SIGKILL");
+        } catch {
+          // already dead
+        }
+      }
+    }
+  });
+
+  it("forwards SIGINT to a hanging grandchild when the full tackle process is interrupted", async () => {
+    const fixture = fileURLToPath(new URL("./fixtures/exec-sigint-integration.ts", import.meta.url));
+
+    // Run the fixture as a real, separate OS process directly under node
+    // (native TypeScript type-stripping, not tsx) so the process actually
+    // dies from the raw, unhandled SIGINT rather than tsx's runtime
+    // translating it into an explicit process.exit(128+n) call, which would
+    // defeat this test's whole point of checking the *conventional signal*
+    // exit status.
+    const child = spawn(process.execPath, ["--experimental-strip-types", fixture], {
+      cwd: process.cwd(),
+      env: nodeEnv,
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+
+    let grandchildPid = -1;
+    let stdout = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+      const match = stdout.match(/grandchild:(\d+)/);
+      if (match?.[1]) grandchildPid = Number(match[1]);
+    });
+
+    try {
+      await waitFor(() => grandchildPid !== -1, 10_000);
+      expect(Number.isInteger(grandchildPid) && grandchildPid > 0).toBe(true);
+
+      const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+        child.on("exit", (code, signal) => resolve({ code, signal }));
+      });
+
+      process.kill(child.pid!, "SIGINT");
+
+      const { code, signal } = await exited;
+      expect(signal).toBe("SIGINT");
+      expect(code).toBeNull();
+
+      expect(await waitForDeath(grandchildPid)).toBe(true);
+    } finally {
+      if (grandchildPid > 0) {
+        try {
+          process.kill(grandchildPid, "SIGKILL");
+        } catch {
+          // already dead
+        }
+      }
+      if (!child.killed) {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // already dead
         }
       }
     }
