@@ -72,6 +72,17 @@ describe("CodexAdapter", () => {
     expect(result.status).toBe("tool_error");
   });
 
+  it("persists stderr to the transcript on tool_error", async () => {
+    const workdir = makeRepo();
+    const adapter = makeAdapter({
+      fixture: join(fixturesDir, "codex-failed.jsonl"),
+      stderr: "boom: something broke\n",
+    });
+    const result = await adapter.run({ prompt: "p", workdir, effort: "medium" });
+    expect(result.status).toBe("tool_error");
+    expect(readFileSync(result.transcriptRef, "utf8")).toContain("boom: something broke");
+  });
+
   it("grades a nonzero exit as tool_error even with a complete stream", async () => {
     const workdir = makeRepo();
     const adapter = makeAdapter({

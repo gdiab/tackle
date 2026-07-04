@@ -13,7 +13,12 @@ export function buildAdapterEnv(opts: {
   extra?: Record<string, string>;
 }): Record<string, string> {
   const banned = new Set<string>(BANNED_ENV_KEYS);
-  const env: Record<string, string> = {};
+  // Null-prototype object: a plain `{}` treats a "__proto__" key specially
+  // (the legacy accessor silently swallows non-object assignments instead of
+  // creating an own property), which would drop that key even though it
+  // passes the collision check below. With no prototype, "__proto__" is just
+  // an ordinary own key like any other.
+  const env: Record<string, string> = Object.create(null) as Record<string, string>;
 
   for (const key of opts.allow) {
     if (banned.has(key)) {
@@ -27,7 +32,7 @@ export function buildAdapterEnv(opts: {
     if (banned.has(key)) {
       throw new AdapterEnvError(`banned env key in extra: ${key}`);
     }
-    if (key in env) {
+    if (Object.hasOwn(env, key)) {
       throw new AdapterEnvError(`extra env key collides with allowlisted base key: ${key}`);
     }
     env[key] = value;

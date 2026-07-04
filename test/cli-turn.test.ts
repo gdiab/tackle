@@ -43,4 +43,26 @@ describe("tackle turn", () => {
       program.parseAsync(["turn", "p", "--effort", "ultra"], { from: "user" }),
     ).rejects.toThrow();
   });
+
+  it("rejects a non-positive timeout", async () => {
+    const run = vi.fn(async () => fakeResult);
+    const adapter: Adapter = { name: "codex", run };
+    const program = buildProgram({ adapter, writeOut: () => {} });
+    program.exitOverride();
+    await expect(
+      program.parseAsync(["turn", "p", "--timeout", "0"], { from: "user" }),
+    ).rejects.toThrow();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-numeric timeout", async () => {
+    const run = vi.fn(async () => fakeResult);
+    const adapter: Adapter = { name: "codex", run };
+    const program = buildProgram({ adapter, writeOut: () => {} });
+    program.exitOverride();
+    await expect(
+      program.parseAsync(["turn", "p", "--timeout", "soon"], { from: "user" }),
+    ).rejects.toThrow();
+    expect(run).not.toHaveBeenCalled();
+  });
 });

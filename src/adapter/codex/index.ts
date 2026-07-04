@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { buildAdapterEnv } from "../env.js";
 import { runCommand } from "../exec.js";
 import { captureWorkdirDiff, resolveHead } from "../diff.js";
+import { transcriptFilename } from "../transcript.js";
 import type { Adapter, TurnRequest, TurnResult, TokenUsage } from "../types.js";
 import { EMPTY_USAGE } from "../types.js";
 import { buildPrintCommand } from "./command.js";
@@ -73,21 +74,25 @@ export class CodexAdapter implements Adapter {
       diffError = err;
     }
 
-    const transcriptDir = join(req.workdir, ".tackle", "transcripts");
-    await mkdir(transcriptDir, { recursive: true });
-    const transcriptRef = join(
-      transcriptDir,
-      `${new Date().toISOString().replace(/[:.]/g, "-")}-codex.jsonl`,
-    );
-    await writeFile(transcriptRef, rawLines.join("\n") + "\n");
-
-    if (diffError !== undefined) throw diffError;
-
     let status: TurnResult["status"];
     if (exec.timedOut) status = "timeout";
     else if (errored || exec.exitCode !== 0) status = "tool_error";
     else if (usage !== null) status = "completed";
     else status = "tool_error";
+
+    const transcriptDir = join(req.workdir, ".tackle", "transcripts");
+    await mkdir(transcriptDir, { recursive: true });
+    const transcriptRef = join(transcriptDir, transcriptFilename("codex", "jsonl"));
+    // On a failed run the stream alone may not explain why -- e.g. codex prints
+    // the real error to stderr rather than as a stream event -- so fold it into
+    // the transcript rather than losing it.
+    let transcriptContent = rawLines.join("\n") + "\n";
+    if (status === "tool_error" && exec.stderr.length > 0) {
+      transcriptContent += exec.stderr;
+    }
+    await writeFile(transcriptRef, transcriptContent);
+
+    if (diffError !== undefined) throw diffError;
 
     return {
       status,

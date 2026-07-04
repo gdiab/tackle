@@ -36,4 +36,16 @@ describe("buildAdapterEnv", () => {
   it("throws when a banned key arrives via extra", () => {
     expect(() => buildAdapterEnv({ base, allow: ["PATH"], extra: { OPENAI_API_KEY: "x" } })).toThrow(AdapterEnvError);
   });
+
+  it("does not false-positive collide on inherited keys like toString", () => {
+    const env = buildAdapterEnv({ base: { PATH: "/usr/bin" }, allow: ["PATH"], extra: { toString: "x" } });
+    expect(env.toString).toBe("x");
+  });
+
+  it("does not silently drop a __proto__ extra key", () => {
+    const env = buildAdapterEnv({ base: { PATH: "/usr/bin" }, allow: ["PATH"], extra: { ["__proto__"]: "x" } });
+    expect(Object.hasOwn(env, "__proto__")).toBe(true);
+    expect(env["__proto__"]).toBe("x");
+    expect(Object.prototype.propertyIsEnumerable.call(env, "__proto__")).toBe(true);
+  });
 });
