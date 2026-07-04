@@ -82,6 +82,15 @@ describe("ClaudeAdapter", () => {
     expect(result.status).toBe("tool_error");
   });
 
+  it("persists stderr to the transcript on tool_error", async () => {
+    const repo = makeRepo();
+    const env = makeEnv({ exitCode: 3, stderr: "boom: something broke\n" });
+    const adapter = new ClaudeAdapter({ baseEnv: env, readCredentials: async () => SUB_CREDS });
+    const result = await adapter.run({ prompt: "p", workdir: repo, effort: "medium" });
+    expect(result.status).toBe("tool_error");
+    expect(readFileSync(result.transcriptRef, "utf8")).toContain("boom: something broke");
+  });
+
   it("captures a diff when the subprocess writes to the tree", async () => {
     const repo = makeRepo();
     const env = makeEnv({ writeFile: { path: join(repo, "sneaky.ts"), content: "x" } });

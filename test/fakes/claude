@@ -16,6 +16,7 @@ process.stdin.on("end", () => {
   if (knobs.promptFile) fs.writeFileSync(knobs.promptFile, stdin);
   if (knobs.writeFile) fs.writeFileSync(knobs.writeFile.path, knobs.writeFile.content);
   if (knobs.envFile) fs.writeFileSync(knobs.envFile, JSON.stringify({ USER: process.env.USER ?? null }));
+  if (knobs.stderr) process.stderr.write(knobs.stderr);
   const result = knobs.result ?? {
     type: "result",
     subtype: "success",

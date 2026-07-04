@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { captureWorkdirDiff, resolveHead } from "../diff.js";
 import { buildAdapterEnv } from "../env.js";
 import { runCommand } from "../exec.js";
+import { transcriptFilename } from "../transcript.js";
 import type { Adapter, TurnRequest, TurnResult } from "../types.js";
 import { EMPTY_USAGE } from "../types.js";
 import { defaultCredentialsReader, detectBillingType } from "./billing.js";
@@ -60,20 +61,24 @@ export class ClaudeAdapter implements Adapter {
       diffError = err;
     }
 
-    const transcriptDir = join(req.workdir, ".tackle", "transcripts");
-    await mkdir(transcriptDir, { recursive: true });
-    const transcriptRef = join(
-      transcriptDir,
-      `${new Date().toISOString().replace(/[:.]/g, "-")}-claude.json`,
-    );
-    await writeFile(transcriptRef, exec.stdout);
-
-    if (diffError !== undefined) throw diffError;
-
     let status: TurnResult["status"];
     if (exec.timedOut) status = "timeout";
     else if (exec.exitCode !== 0) status = "tool_error";
     else status = parsed.status;
+
+    const transcriptDir = join(req.workdir, ".tackle", "transcripts");
+    await mkdir(transcriptDir, { recursive: true });
+    const transcriptRef = join(transcriptDir, transcriptFilename("claude", "json"));
+    // On a failed run claude's stdout may not be the (single) JSON result claude
+    // normally emits -- e.g. a crash before it can print one -- so fold stderr
+    // into the transcript rather than losing why the turn failed.
+    let transcriptContent = exec.stdout;
+    if (status === "tool_error" && exec.stderr.length > 0) {
+      transcriptContent += exec.stderr;
+    }
+    await writeFile(transcriptRef, transcriptContent);
+
+    if (diffError !== undefined) throw diffError;
 
     return {
       status,
