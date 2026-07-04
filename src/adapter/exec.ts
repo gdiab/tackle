@@ -13,7 +13,11 @@ export interface ExecResult {
 // removed at every settle/reject choke point below, so the set can never
 // leak a pid past the lifetime of its runCommand() call.
 const activeGroups = new Set<number>();
-let signalForwardingInstalled = false;
+// Tracks which signals (SIGINT, SIGTERM) have handlers currently installed.
+// Per-signal tracking allows recovery if a signal is re-raised and the process
+// survives (e.g., due to another listener); the next runCommand will detect
+// the signal is no longer installed and re-arm it.
+const installedSignals = new Set<string>();
 
 /**
  * Send `signal` to every tracked child's process group. Called by the
@@ -40,15 +44,19 @@ export function activeGroupCount(): number {
 // exec.ts never has the side effect of touching process-global signal
 // listeners.
 function installSignalForwarding(): void {
-  if (signalForwardingInstalled) return;
-  signalForwardingInstalled = true;
   for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    if (installedSignals.has(sig)) continue;
+    installedSignals.add(sig);
     const handler = () => {
       killActiveGroups(sig);
       // Restore default disposition and re-raise so the process still exits
       // with the conventional signal status. Without this, installing a
       // listener would swallow the signal and keep tackle alive.
       process.removeListener(sig, handler);
+      // Mark the signal as no longer installed so that if the process survives
+      // the re-raise (due to another listener), the next runCommand will
+      // re-install forwarding for this signal.
+      installedSignals.delete(sig);
       process.kill(process.pid, sig);
     };
     process.on(sig, handler);
