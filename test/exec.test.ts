@@ -5,6 +5,9 @@ import { activeGroupCount, killActiveGroups, runCommand } from "../src/adapter/e
 
 const nodeEnv = { PATH: process.env.PATH ?? "" };
 
+const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
+const supportsStripTypes = nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 6);
+
 async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate() && Date.now() < deadline) {
@@ -239,7 +242,7 @@ describe("runCommand", () => {
     }
   });
 
-  it("forwards SIGINT to a hanging grandchild when the full tackle process is interrupted", async () => {
+  it.skipIf(!supportsStripTypes)("forwards SIGINT to a hanging grandchild when the full tackle process is interrupted", async () => {
     const fixture = fileURLToPath(new URL("./fixtures/exec-sigint-integration.ts", import.meta.url));
 
     // Run the fixture as a real, separate OS process directly under node
