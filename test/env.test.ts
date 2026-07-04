@@ -41,4 +41,11 @@ describe("buildAdapterEnv", () => {
     const env = buildAdapterEnv({ base: { PATH: "/usr/bin" }, allow: ["PATH"], extra: { toString: "x" } });
     expect(env.toString).toBe("x");
   });
+
+  it("does not silently drop a __proto__ extra key", () => {
+    const env = buildAdapterEnv({ base: { PATH: "/usr/bin" }, allow: ["PATH"], extra: { ["__proto__"]: "x" } });
+    expect(Object.hasOwn(env, "__proto__")).toBe(true);
+    expect(env["__proto__"]).toBe("x");
+    expect(Object.prototype.propertyIsEnumerable.call(env, "__proto__")).toBe(true);
+  });
 });
