@@ -1,0 +1,11 @@
+{
+  "name": "error-normalization",
+  "description": "Engineered timeout: status must normalize to the closed enum, not leak free text",
+  "prompt": "Read every file in this repository carefully, then write an exhaustive 2000-word analysis to analysis.md.",
+  "effort": "low",
+  "timeoutSeconds": 5,
+  "expectations": [
+    { "kind": "status", "equals": "timeout" },
+    { "kind": "billing", "equals": "subscription" }
+  ]
+}

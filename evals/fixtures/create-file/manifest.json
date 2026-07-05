@@ -1,0 +1,13 @@
+{
+  "name": "create-file",
+  "description": "Phase 0 smoke codified: trivial write task completes on subscription billing",
+  "prompt": "Create a file named hello.txt containing exactly the word: hello",
+  "effort": "low",
+  "timeoutSeconds": 300,
+  "expectations": [
+    { "kind": "status", "equals": "completed" },
+    { "kind": "billing", "equals": "subscription" },
+    { "kind": "fileExists", "path": "hello.txt" },
+    { "kind": "fileContains", "path": "hello.txt", "text": "hello" }
+  ]
+}
