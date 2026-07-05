@@ -6,6 +6,10 @@ import { Command, InvalidArgumentError, Option } from "commander";
 import { ClaudeAdapter } from "./adapter/claude/index.js";
 import { CodexAdapter } from "./adapter/codex/index.js";
 import type { Adapter, Effort } from "./adapter/types.js";
+import { listFixtures } from "./evals/manifest.js";
+import { readResult } from "./evals/results.js";
+import { checkFixture, runFixture } from "./evals/runner.js";
+import { deriveState } from "./evals/state.js";
 import { buildMap } from "./map/builder.js";
 import { createVitestCoverageRunner } from "./map/coverage.js";
 import { describeMap, testsFor } from "./map/query.js";
@@ -115,6 +119,104 @@ function registerMapCommands(program: Command, writeOut: (s: string) => void): v
       writeOut(`built ${status.builtAt} (${status.mode})\n`);
       writeOut(`${status.testCount} test file(s) -> ${status.sourceCount} source file(s)\n`);
       for (const testFile of status.coverageFailures) writeOut(`coverage failed: ${testFile}\n`);
+    });
+}
+
+function formatAge(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function registerEvalCommands(
+  program: Command,
+  writeOut: (s: string) => void,
+  defaultAdapter: () => Adapter,
+): void {
+  const evalCmd = program.command("eval").description("Live-turn eval fixtures with model-free grading");
+
+  evalCmd
+    .command("run")
+    .description("Run fixtures: replay-grade on a fingerprint hit, live turn on a miss")
+    .argument("[fixtures...]", "fixture names (default: all)")
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .option("--force", "run a live turn even on a fingerprint hit")
+    .action(async (fixtures: string[], options: { cwd: string; force?: boolean }) => {
+      const names = fixtures.length > 0 ? fixtures : await listFixtures(options.cwd);
+      if (names.length === 0) {
+        writeOut("no fixtures under evals/fixtures\n");
+        process.exitCode = 1;
+        return;
+      }
+      const adapter = defaultAdapter();
+      for (const name of names) {
+        const report = await runFixture({
+          workdir: options.cwd,
+          fixture: name,
+          adapter,
+          force: options.force === true,
+        });
+        const verdict = report.latestGrade.pass ? "pass" : "fail";
+        writeOut(`${name}: ${report.mode} ${verdict} (${report.state})\n`);
+        for (const g of report.latestGrade.expectations) {
+          if (!g.pass) writeOut(`  fail ${g.expectation.kind}: ${g.message}\n`);
+        }
+        if (!report.latestGrade.pass) process.exitCode = 1;
+      }
+    });
+
+  evalCmd
+    .command("status")
+    .description("Show fixture states from recorded results (always exits 0)")
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .action(async (options: { cwd: string }) => {
+      const names = await listFixtures(options.cwd);
+      if (names.length === 0) {
+        writeOut("no fixtures under evals/fixtures\n");
+        return;
+      }
+      for (const name of names) {
+        const result = await readResult(options.cwd, name);
+        const latest = result?.runs[0];
+        if (result === null || latest === undefined) {
+          writeOut(`${name.padEnd(24)} no runs\n`);
+          continue;
+        }
+        const passes = result.runs.map((r) => r.grade.pass);
+        const state = deriveState(passes);
+        const rate = `${passes.filter(Boolean).length}/${passes.length}`;
+        const runs = `${result.runs.length} run${result.runs.length === 1 ? "" : "s"}`;
+        const age = formatAge(Date.now() - Date.parse(latest.at));
+        const model = latest.envelope.authorship.model ?? "default";
+        writeOut(`${name.padEnd(24)} ${state.padEnd(8)} ${rate.padEnd(6)} ${runs.padEnd(8)} ${age.padEnd(10)} ${model}\n`);
+      }
+    });
+
+  evalCmd
+    .command("check")
+    .description("Replay-only CI gate: stale or failing blocks; flaky warns")
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .action(async (options: { cwd: string }) => {
+      const names = await listFixtures(options.cwd);
+      if (names.length === 0) {
+        writeOut("no fixtures under evals/fixtures\n");
+        process.exitCode = 1;
+        return;
+      }
+      const adapterName = defaultAdapter().name;
+      for (const name of names) {
+        const report = await checkFixture({ workdir: options.cwd, fixture: name, adapterName });
+        if (report.stale) {
+          writeOut(`${name}: stale — fixture inputs changed since the recorded runs; re-run locally: tackle eval run ${name}\n`);
+          process.exitCode = 1;
+          continue;
+        }
+        writeOut(`${name}: ${report.state}\n`);
+        if (report.state === "failing") process.exitCode = 1;
+      }
     });
 }
 
@@ -259,6 +361,7 @@ export function buildProgram(
     });
 
   registerMapCommands(program, writeOut);
+  registerEvalCommands(program, writeOut, () => opts.adapter ?? new CodexAdapter());
 
   return program;
 }
