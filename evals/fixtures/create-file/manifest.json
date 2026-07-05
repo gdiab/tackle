@@ -8,6 +8,7 @@
     { "kind": "status", "equals": "completed" },
     { "kind": "billing", "equals": "subscription" },
     { "kind": "fileExists", "path": "hello.txt" },
-    { "kind": "fileContains", "path": "hello.txt", "text": "hello" }
+    { "kind": "fileContains", "path": "hello.txt", "text": "hello" },
+    { "kind": "diffTouchesOnly", "globs": ["hello.txt"] }
   ]
 }

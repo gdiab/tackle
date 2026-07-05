@@ -38,6 +38,16 @@ describe("readResult / writeResult", () => {
     expect(raw.endsWith("\n")).toBe(true);
   });
 
+  it("caps runs at RUN_WINDOW on read, even when the file holds more", async () => {
+    const workdir = await tempWorkdir();
+    const runs = Array.from({ length: 12 }, (_, i) => run(`t${i + 1}`));
+    const result = { fixture: "create-file", fingerprint: "sha256:abc", runs };
+    await writeResult(workdir, result);
+    const read = await readResult(workdir, "create-file");
+    expect(read?.runs).toHaveLength(RUN_WINDOW);
+    expect(read?.runs[0]?.at).toBe("t1");
+  });
+
   it("throws with guidance on invalid JSON and on a wrong shape", async () => {
     const workdir = await tempWorkdir();
     await mkdir(join(workdir, "evals", "results"), { recursive: true });

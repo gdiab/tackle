@@ -103,7 +103,7 @@ Blocking policy (drives `check`'s exit code): states are derived from the fresh 
 `tackle eval` command group, following the `tackle map` group's flag/output conventions:
 
 - `tackle eval run [fixture…]` — attended, token-spending. No args = all fixtures. Replay-grade on fingerprint hit (says so); live turn on miss; `--force` bypasses. Exit nonzero if any grade fails.
-- `tackle eval status` — the state table: fixture, state, pass-rate over window, runs recorded, last-run age, model. Always exits 0.
+- `tackle eval status` — the state table: fixture, state, pass-rate over window, runs recorded, last-run age, model. Always exits 0. States shown by `status` come from the stored grades (refreshed on every `run`, including replays); after an expectations-only edit they can lag until the next `run` or `check` — `check` is always the fresh-re-grade authority.
 - `tackle eval check` — unattended/CI: replay-only, never spends a token. Stale → fail; `failing` → fail; `flaky` → warn/pass; clean → pass.
 
 Live runs go through the same adapter path as `tackle turn`, so `billingType` lands in every recorded envelope (subscription-before-API assertion rides along).

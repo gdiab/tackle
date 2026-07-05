@@ -42,6 +42,10 @@ export async function readResult(workdir: string, fixture: string): Promise<Resu
   if (typeof result.fixture !== "string" || typeof result.fingerprint !== "string" || !Array.isArray(result.runs)) {
     throw new Error(`${file} is missing its fixture/fingerprint/runs structure; delete it and re-run \`tackle eval run ${fixture}\``);
   }
+  // The window invariant is enforced on read, not just on write: a hand-edited or
+  // merge-mangled file with more than RUN_WINDOW runs must not silently widen the
+  // state-derivation window.
+  result.runs = result.runs.slice(0, RUN_WINDOW);
   return result;
 }
 
