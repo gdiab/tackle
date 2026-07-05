@@ -1,0 +1,77 @@
+{
+  "fixture": "create-file",
+  "fingerprint": "sha256:ff5de4573d3dcea228b27e340d2c6616f0c94b5937483b4e0e5daa1fc6dd2b08",
+  "runs": [
+    {
+      "at": "2026-07-05T23:00:00.477Z",
+      "adapterVersion": "codex-cli 0.142.5",
+      "envelope": {
+        "status": "completed",
+        "summary": "Created [hello.txt](/private/var/folders/lr/s84ph35x1h304sdl7_qxpwyr0000gn/T/tackle-eval-aJub5v/hello.txt) containing `hello`.",
+        "authorship": {
+          "adapter": "codex",
+          "model": null,
+          "effort": "low"
+        },
+        "usage": {
+          "tokens": {
+            "inputTokens": 8486,
+            "cacheReadInputTokens": 18176,
+            "outputTokens": 105,
+            "reasoningOutputTokens": 0
+          },
+          "billingType": "subscription"
+        }
+      },
+      "workdirDiff": "diff --git a/hello.txt b/hello.txt\nnew file mode 100644\nindex 0000000..ce01362\n--- /dev/null\n+++ b/hello.txt\n@@ -0,0 +1 @@\n+hello\n",
+      "grade": {
+        "pass": true,
+        "expectations": [
+          {
+            "expectation": {
+              "kind": "status",
+              "equals": "completed"
+            },
+            "pass": true,
+            "message": ""
+          },
+          {
+            "expectation": {
+              "kind": "billing",
+              "equals": "subscription"
+            },
+            "pass": true,
+            "message": ""
+          },
+          {
+            "expectation": {
+              "kind": "fileExists",
+              "path": "hello.txt"
+            },
+            "pass": true,
+            "message": ""
+          },
+          {
+            "expectation": {
+              "kind": "fileContains",
+              "path": "hello.txt",
+              "text": "hello"
+            },
+            "pass": true,
+            "message": ""
+          },
+          {
+            "expectation": {
+              "kind": "diffTouchesOnly",
+              "globs": [
+                "hello.txt"
+              ]
+            },
+            "pass": true,
+            "message": ""
+          }
+        ]
+      }
+    }
+  ]
+}

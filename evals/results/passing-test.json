@@ -1,0 +1,77 @@
+{
+  "fixture": "passing-test",
+  "fingerprint": "sha256:9e0124a8874227aa41956f9183af4cf3ac354ef03d3e084becea71728d689a1c",
+  "runs": [
+    {
+      "at": "2026-07-05T23:00:40.340Z",
+      "adapterVersion": "codex-cli 0.142.5",
+      "envelope": {
+        "status": "completed",
+        "summary": "Created exactly `math.js` and `math.test.js`.\n\nVerification passed with `node --test`:\n`1` test passed, `0` failed.",
+        "authorship": {
+          "adapter": "codex",
+          "model": null,
+          "effort": "low"
+        },
+        "usage": {
+          "tokens": {
+            "inputTokens": 8141,
+            "cacheReadInputTokens": 32384,
+            "outputTokens": 254,
+            "reasoningOutputTokens": 0
+          },
+          "billingType": "subscription"
+        }
+      },
+      "workdirDiff": "diff --git a/math.js b/math.js\nnew file mode 100644\nindex 0000000..4ed55b5\n--- /dev/null\n+++ b/math.js\n@@ -0,0 +1,5 @@\n+function add(a, b) {\n+  return a + b;\n+}\n+\n+module.exports = { add };\ndiff --git a/math.test.js b/math.test.js\nnew file mode 100644\nindex 0000000..50f9489\n--- /dev/null\n+++ b/math.test.js\n@@ -0,0 +1,7 @@\n+const test = require(\"node:test\");\n+const assert = require(\"node:assert/strict\");\n+const { add } = require(\"./math\");\n+\n+test(\"add returns the sum of two values\", () => {\n+  assert.equal(add(2, 3), 5);\n+});\n",
+      "grade": {
+        "pass": true,
+        "expectations": [
+          {
+            "expectation": {
+              "kind": "status",
+              "equals": "completed"
+            },
+            "pass": true,
+            "message": ""
+          },
+          {
+            "expectation": {
+              "kind": "billing",
+              "equals": "subscription"
+            },
+            "pass": true,
+            "message": ""
+          },
+          {
+            "expectation": {
+              "kind": "fileExists",
+              "path": "math.test.js"
+            },
+            "pass": true,
+            "message": ""
+          },
+          {
+            "expectation": {
+              "kind": "commandSucceeds",
+              "command": "node --test"
+            },
+            "pass": true,
+            "message": ""
+          },
+          {
+            "expectation": {
+              "kind": "diffTouchesOnly",
+              "globs": [
+                "math.js",
+                "math.test.js"
+              ]
+            },
+            "pass": true,
+            "message": ""
+          }
+        ]
+      }
+    }
+  ]
+}
