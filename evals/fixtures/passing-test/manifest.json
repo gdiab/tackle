@@ -1,0 +1,14 @@
+{
+  "name": "passing-test",
+  "description": "Task must produce a test that actually passes, verified by running it",
+  "prompt": "Write math.js exporting an add(a, b) function that returns a + b, and math.test.js that tests add using node:test and node:assert. The tests must pass under `node --test`. Create exactly those two files and change nothing else.",
+  "effort": "low",
+  "timeoutSeconds": 600,
+  "expectations": [
+    { "kind": "status", "equals": "completed" },
+    { "kind": "billing", "equals": "subscription" },
+    { "kind": "fileExists", "path": "math.test.js" },
+    { "kind": "commandSucceeds", "command": "node --test" },
+    { "kind": "diffTouchesOnly", "globs": ["math.js", "math.test.js"] }
+  ]
+}

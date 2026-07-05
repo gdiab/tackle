@@ -7,7 +7,7 @@
     "tackle": "./dist/cli.js"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.5"
   },
   "packageManager": "pnpm@10.16.1",
   "scripts": {

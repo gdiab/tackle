@@ -1,0 +1,13 @@
+{
+  "name": "edit-file",
+  "description": "Seeded edit with no collateral damage: diffTouchesOnly pins the blast radius",
+  "prompt": "In greeting.txt, replace the word world with tackle. Change nothing else and create no new files.",
+  "effort": "low",
+  "timeoutSeconds": 300,
+  "expectations": [
+    { "kind": "status", "equals": "completed" },
+    { "kind": "billing", "equals": "subscription" },
+    { "kind": "fileContains", "path": "greeting.txt", "text": "hello tackle" },
+    { "kind": "diffTouchesOnly", "globs": ["greeting.txt"] }
+  ]
+}
