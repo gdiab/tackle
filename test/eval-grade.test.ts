@@ -113,6 +113,23 @@ describe("diffTouchesOnly", () => {
   it("passes on an empty diff", async () => {
     expect((await gradeOne({ kind: "diffTouchesOnly", globs: ["src/**"] }, { workdirDiff: "" })).grade.pass).toBe(true);
   });
+
+  it("does not mistake a removed content line for a diff header", () => {
+    // The hunk removes a line whose own text is `-- a/sneaky.ts`; prefixed with
+    // the diff's leading `-` for a removed line, it renders as `--- a/sneaky.ts`
+    // — indistinguishable from a real header by text alone.
+    const trickyDiff = [
+      "diff --git a/src/keep.ts b/src/keep.ts",
+      "index 000..111 100644",
+      "--- a/src/keep.ts",
+      "+++ b/src/keep.ts",
+      "@@ -1,2 +1 @@",
+      "--- a/sneaky.ts",
+      "+new",
+      "",
+    ].join("\n");
+    expect(diffPaths(trickyDiff)).toEqual(["src/keep.ts"]);
+  });
 });
 
 describe("exhaustiveness", () => {

@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { readResult } from "../src/evals/results.js";
@@ -97,9 +97,13 @@ describe("runFixture", () => {
 
     const first = await runFixture({ workdir, fixture: "hello", adapter: good, adapterVersion: version });
     expect(first.state).toBe("healthy");
+    expect(first.debugWorkdir).toBeUndefined();
     const second = await runFixture({ workdir, fixture: "hello", adapter: bad, force: true, adapterVersion: version });
     expect(second.latestGrade.pass).toBe(false);
     expect(second.state).toBe("flaky");
+    expect(second.debugWorkdir).toBeDefined();
+
+    await rm(second.debugWorkdir as string, { recursive: true, force: true });
   });
 });
 

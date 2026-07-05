@@ -31,7 +31,21 @@ export interface Grade {
 /** Sorted unique repo-relative paths a unified diff touches (a/ and b/ sides, /dev/null excluded). */
 export function diffPaths(diff: string): string[] {
   const paths = new Set<string>();
+  // Only match `---`/`+++` header lines while "armed" by a preceding `diff --git`
+  // line, and disarm at the next hunk (`@@`). Without this, a removed content
+  // line that itself reads like a header (e.g. `-- a/sneaky.ts` rendered as
+  // `--- a/sneaky.ts`) would be mistaken for a real path header.
+  let armed = false;
   for (const line of diff.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      armed = true;
+      continue;
+    }
+    if (line.startsWith("@@")) {
+      armed = false;
+      continue;
+    }
+    if (!armed) continue;
     const match = /^(?:---|\+\+\+) [ab]\/(.+)$/.exec(line);
     if (match?.[1] !== undefined) paths.add(match[1]);
   }

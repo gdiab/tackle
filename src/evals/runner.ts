@@ -27,7 +27,11 @@ export async function defaultAdapterVersion(adapter: Adapter): Promise<string> {
 }
 
 /** Re-materialize the seed, apply the recorded diff, and grade against current expectations. */
-async function regrade(fixtureDir: string, manifest: FixtureManifest, run: RecordedRun): Promise<Grade> {
+async function regrade(
+  fixtureDir: string,
+  manifest: FixtureManifest,
+  run: Pick<RecordedRun, "envelope" | "workdirDiff">,
+): Promise<Grade> {
   const workdir = await materializeWorkdir(fixtureDir);
   try {
     await applyRecordedDiff(workdir, run.workdirDiff);
@@ -42,6 +46,8 @@ export interface RunReport {
   mode: "live" | "replay";
   state: FixtureState;
   latestGrade: Grade;
+  /** Set only when a live run's grade failed: the turn workdir was kept (not rm'd) for debugging. */
+  debugWorkdir?: string;
 }
 
 export async function runFixture(opts: {
@@ -75,6 +81,7 @@ export async function runFixture(opts: {
 
   // Live turn: attended, token-spending, through the same adapter seam as `tackle turn`.
   const turnWorkdir = await materializeWorkdir(fixtureDir);
+  let grade: Grade | undefined;
   try {
     const result = await opts.adapter.run({
       prompt: manifest.prompt,
@@ -88,7 +95,10 @@ export async function runFixture(opts: {
       authorship: result.authorship,
       usage: result.usage,
     };
-    const grade = await gradeFixture({ manifest, envelope, workdir: turnWorkdir, workdirDiff: result.workdirDiff });
+    // Grade the same reconstruction (seed + applied diff) that a replay will
+    // grade, not the live turn workdir — the turn workdir also contains
+    // `.tackle/`, so grading it directly could pass live and fail every replay.
+    grade = await regrade(fixtureDir, manifest, { envelope, workdirDiff: result.workdirDiff });
     const run: RecordedRun = {
       at: (opts.now?.() ?? new Date()).toISOString(),
       adapterVersion: await (opts.adapterVersion ?? defaultAdapterVersion)(opts.adapter),
@@ -103,9 +113,15 @@ export async function runFixture(opts: {
       mode: "live",
       state: deriveState(updated.runs.map((r) => r.grade.pass)),
       latestGrade: grade,
+      ...(grade.pass ? {} : { debugWorkdir: turnWorkdir }),
     };
   } finally {
-    await rm(turnWorkdir, { recursive: true, force: true });
+    // Keep the turn workdir when the live grade failed: `.tackle/transcripts/*`
+    // inside it is the debugging evidence for why the turn failed. Clean up
+    // on a pass (or if we never got a grade at all, e.g. the turn threw).
+    if (grade === undefined || grade.pass) {
+      await rm(turnWorkdir, { recursive: true, force: true });
+    }
   }
 }
 

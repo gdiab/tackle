@@ -49,6 +49,7 @@ describe("tackle eval run", () => {
     const { out } = await cli(["eval", "run", "--cwd", workdir], evalAdapter({ "wrong.txt": "nope\n" }));
     expect(out).toContain("hello: live fail");
     expect(out).toContain("fail fileContains: hello.txt does not exist");
+    expect(out).toContain("turn workdir kept:");
     expect(process.exitCode).toBe(1);
   });
 
@@ -105,6 +106,7 @@ describe("tackle eval check", () => {
     process.exitCode = undefined;
     result = await cli(["eval", "check", "--cwd", workdir]);
     expect(result.out).toContain("hello: flaky");
+    expect(result.out).toContain("hello: flaky (warning — not blocking)");
     expect(process.exitCode).toBeUndefined();
 
     // Expectation nobody can meet -> every run re-grades to fail -> failing -> exit 1.

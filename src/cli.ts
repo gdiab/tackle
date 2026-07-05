@@ -164,6 +164,7 @@ function registerEvalCommands(
         for (const g of report.latestGrade.expectations) {
           if (!g.pass) writeOut(`  fail ${g.expectation.kind}: ${g.message}\n`);
         }
+        if (report.debugWorkdir !== undefined) writeOut(`  turn workdir kept: ${report.debugWorkdir}\n`);
         if (!report.latestGrade.pass) process.exitCode = 1;
       }
     });
@@ -214,7 +215,7 @@ function registerEvalCommands(
           process.exitCode = 1;
           continue;
         }
-        writeOut(`${name}: ${report.state}\n`);
+        writeOut(`${name}: ${report.state === "flaky" ? "flaky (warning — not blocking)" : report.state}\n`);
         if (report.state === "failing") process.exitCode = 1;
       }
     });
