@@ -6,6 +6,7 @@ import { Command, InvalidArgumentError, Option } from "commander";
 import { ClaudeAdapter } from "./adapter/claude/index.js";
 import { CodexAdapter } from "./adapter/codex/index.js";
 import type { Adapter, Effort } from "./adapter/types.js";
+import { appendDecision, DECISIONS_FILE, formatDecisionId, readDecisions } from "./decisions/store.js";
 import { listFixtures } from "./evals/manifest.js";
 import { readResult } from "./evals/results.js";
 import { checkFixture, runFixture } from "./evals/runner.js";
@@ -162,6 +163,43 @@ function registerTelemetryCommand(program: Command, writeOut: (s: string) => voi
           ? JSON.stringify({ ...report, malformed }, null, 2) + "\n"
           : renderTelemetryReport(report, { malformed }),
       );
+    });
+}
+
+function registerDecisionCommands(program: Command, writeOut: (s: string) => void): void {
+  const decision = program.command("decision").description(`Append-only decision log (${DECISIONS_FILE})`);
+  const collect = (value: string, previous: string[]): string[] => [...previous, value];
+
+  decision
+    .command("add")
+    .description("Append a decision entry")
+    .argument("<title>", "one-line title")
+    .requiredOption("--decision <text>", "what was decided")
+    .option("--rejected <text>", "a rejected alternative (repeatable)", collect, [] as string[])
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .action(async (title: string, options: { decision: string; rejected: string[]; cwd: string }) => {
+      const id = await appendDecision(options.cwd, {
+        title,
+        decision: options.decision,
+        rejected: options.rejected,
+        source: "human",
+      });
+      writeOut(`${id} recorded in ${DECISIONS_FILE}\n`);
+    });
+
+  decision
+    .command("list")
+    .description("List decision entries, one line each")
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .action(async (options: { cwd: string }) => {
+      const entries = await readDecisions(options.cwd);
+      if (entries.length === 0) {
+        writeOut(`no decisions recorded (${DECISIONS_FILE})\n`);
+        return;
+      }
+      for (const e of entries) {
+        writeOut(`${formatDecisionId(e.id)}  ${e.date}  ${e.title}  (${e.source})\n`);
+      }
     });
 }
 
@@ -410,6 +448,7 @@ export function buildProgram(
 
   registerMapCommands(program, writeOut);
   registerTelemetryCommand(program, writeOut);
+  registerDecisionCommands(program, writeOut);
   registerEvalCommands(program, writeOut, () => opts.adapter ?? new CodexAdapter());
 
   return program;
