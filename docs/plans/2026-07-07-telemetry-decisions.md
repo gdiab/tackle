@@ -4,7 +4,7 @@
 
 **Goal:** Per-turn cost/friction telemetry (append-only JSONL ledger + `tackle telemetry` compute-on-read report) and a persistent append-only `.tackle/decisions.md` (CLI + auto-record at the two review-gate moments).
 
-**Architecture:** New `src/telemetry/` module: a `recordedRun()` capture function wraps `adapter.run()` at the five real-turn call sites and appends one self-contained `turn-record/v1` line to `<repo>/.tackle/telemetry/turns.jsonl`; the report reads the ledger fresh every time (forgiving reader) and prices tokens from a checked-in table with a loud `unpriced` fallback. New `src/decisions/` module: the markdown file **is** the store — parse/append with atomic writes; the review commit path auto-appends through the same code path as the CLI.
+**Architecture:** New `src/telemetry/` module: a `recordedRun()` capture function wraps `adapter.run()` at the four real-turn call sites and appends one self-contained `turn-record/v1` line to `<repo>/.tackle/telemetry/turns.jsonl`; the report reads the ledger fresh every time (forgiving reader) and prices tokens from a checked-in table with a loud `unpriced` fallback. New `src/decisions/` module: the markdown file **is** the store — parse/append with atomic writes; the review commit path auto-appends through the same code path as the CLI.
 
 **Tech Stack:** TypeScript (strict, NodeNext ESM), Node >= 22.5, commander, vitest, pnpm. **Zero new npm dependencies.**
 
@@ -1179,7 +1179,7 @@ git commit -m "Add tackle telemetry command"
 
 ---
 
-### Task 7: Wire `recordedRun` at the five real-turn call sites
+### Task 7: Wire `recordedRun` at the four real-turn call sites
 
 **Files:**
 - Modify: `src/cli.ts` (turn command action, ~line 241)
@@ -1344,7 +1344,7 @@ Expected: PASS. Then the full suite: `npx vitest run` — no regressions (phase/
 
 ```bash
 git add src/cli.ts src/workflow/phase.ts src/workflow/review.ts test/telemetry-capture.test.ts test/cli-turn.test.ts
-git commit -m "Record telemetry at the five real-turn call sites"
+git commit -m "Record telemetry at the four real-turn call sites"
 ```
 
 ---
@@ -2177,7 +2177,7 @@ git commit -m "Negate decisions.md from .tackle gitignore; add telemetry e2e"
 | Spec requirement | Task |
 |---|---|
 | `recordedRun` seam, one-line swap, duration capture | 3, 7 |
-| Five call sites with context tags; evals untouched | 7 |
+| Four call sites with context tags; evals untouched | 7 |
 | Telemetry failure never fails the turn | 3 (test: failed append) |
 | `turn-record/v1` shape; no content stored | 2, 3 |
 | `filesTouched` from workdirDiff, hardened parsing | 1, 3 |

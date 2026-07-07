@@ -10,6 +10,8 @@ describe("pricing", () => {
 
   it("unknown models get null, never a silent zero-price row", () => {
     expect(findPricing("wild-new-model-9000")).toBeNull();
+    expect(findPricing("gpt-5-pro")).toBeNull();
+    expect(findPricing("gpt-5")).toBeNull();
   });
 
   it("resolves a null model to the adapter default, and unknown adapters to a label that prices as unpriced", () => {

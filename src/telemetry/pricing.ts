@@ -15,10 +15,15 @@ export interface ModelPricing {
 // adapters' normalization (claude reports 0), so costUsd uses outputTokens
 // alone — reasoning bills at the output rate, matching both vendors.
 // Narrow patterns on purpose: a new model must show up as `unpriced`, loudly.
+// (A bare "gpt-5" catch-all would silently mis-price future gpt-5-* models —
+// e.g. gpt-5-pro is billed far higher than gpt-5.1 — so no such row exists.)
+//
+// Caveat: the claude adapter does not surface cache-creation input tokens
+// (billed at 1.25x the input rate), so claude-turn costUsd is a floor
+// estimate until TokenUsage models that field.
 export const PRICING: ModelPricing[] = [
   { pattern: "gpt-5.1-codex-mini", inputPerMtok: 0.25, cacheReadPerMtok: 0.025, outputPerMtok: 2 },
   { pattern: "gpt-5.1", inputPerMtok: 1.25, cacheReadPerMtok: 0.125, outputPerMtok: 10 },
-  { pattern: "gpt-5", inputPerMtok: 1.25, cacheReadPerMtok: 0.125, outputPerMtok: 10 },
   { pattern: "claude-opus-4-5", inputPerMtok: 5, cacheReadPerMtok: 0.5, outputPerMtok: 25 },
   { pattern: "claude-opus-4-1", inputPerMtok: 15, cacheReadPerMtok: 1.5, outputPerMtok: 75 },
   { pattern: "claude-sonnet-4", inputPerMtok: 3, cacheReadPerMtok: 0.3, outputPerMtok: 15 },
