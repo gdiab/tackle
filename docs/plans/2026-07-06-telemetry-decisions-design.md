@@ -30,7 +30,7 @@ New module `src/telemetry/`. The capture primitive is a function, not a wrapper 
 recordedRun(adapter, req, { repoDir, context }): Promise<TurnResult>
 ```
 
-It times the call, runs `adapter.run(req)`, appends one JSON line to `<repoDir>/.tackle/telemetry/turns.jsonl`, and returns the result unchanged. Call sites swap `adapter.run(...)` for `recordedRun(...)` — one line each, and duration capture can't be forgotten. The five real-turn sites and their context tags:
+It times the call, runs `adapter.run(req)`, appends one JSON line to `<repoDir>/.tackle/telemetry/turns.jsonl`, and returns the result unchanged. Call sites swap `adapter.run(...)` for `recordedRun(...)` — one line each, and duration capture can't be forgotten. The four real-turn sites and their context tags:
 
 | Site | Context |
 | --- | --- |
