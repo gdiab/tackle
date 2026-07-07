@@ -15,6 +15,8 @@ import { createVitestCoverageRunner } from "./map/coverage.js";
 import { describeMap, testsFor } from "./map/query.js";
 import { readTestMap, TEST_MAP_FILE, writeTestMap } from "./map/store.js";
 import type { TestMapFile } from "./map/types.js";
+import { readTurnRecords } from "./telemetry/ledger.js";
+import { computeTelemetryReport, renderTelemetryReport } from "./telemetry/report.js";
 import { runPhase } from "./workflow/phase.js";
 import type { Presenter } from "./workflow/presenter.js";
 import { TerminalPresenter } from "./workflow/presenter.js";
@@ -30,6 +32,15 @@ function parseTimeout(v: string): number {
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) throw new InvalidArgumentError("timeout must be a positive number");
   return n;
+}
+
+function parseSince(v: string): number {
+  const m = /^(\d+)([dh])$/.exec(v);
+  const n = Number(m?.[1]);
+  if (m === null || !Number.isFinite(n) || n <= 0) {
+    throw new InvalidArgumentError("since must look like 7d or 24h");
+  }
+  return n * (m[2] === "d" ? 86_400_000 : 3_600_000);
 }
 
 function withTurnOptions(cmd: Command): Command {
@@ -119,6 +130,37 @@ function registerMapCommands(program: Command, writeOut: (s: string) => void): v
       writeOut(`built ${status.builtAt} (${status.mode})\n`);
       writeOut(`${status.testCount} test file(s) -> ${status.sourceCount} source file(s)\n`);
       for (const testFile of status.coverageFailures) writeOut(`coverage failed: ${testFile}\n`);
+    });
+}
+
+function registerTelemetryCommand(program: Command, writeOut: (s: string) => void): void {
+  program
+    .command("telemetry")
+    .description("Cost and friction report computed fresh from .tackle/telemetry/turns.jsonl")
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .option("--json", "print the report as JSON")
+    .option("--since <duration>", "trailing window like 7d or 24h (default: all records)", parseSince)
+    .action(async (options: { cwd: string; json?: boolean; since?: number }) => {
+      const { records, malformed } = await readTurnRecords(options.cwd);
+      if (malformed > 0) process.stderr.write(`warning: skipped ${malformed} malformed ledger line(s)\n`);
+      const since = options.since;
+      const windowed =
+        since === undefined
+          ? records
+          : records.filter((r) => {
+              const t = Date.parse(r.at);
+              return Number.isFinite(t) && t >= Date.now() - since;
+            });
+      if (windowed.length === 0 && malformed === 0) {
+        writeOut("no turns recorded\n");
+        return;
+      }
+      const report = computeTelemetryReport(windowed);
+      writeOut(
+        options.json === true
+          ? JSON.stringify({ ...report, malformed }, null, 2) + "\n"
+          : renderTelemetryReport(report, { malformed }),
+      );
     });
 }
 
@@ -362,6 +404,7 @@ export function buildProgram(
     });
 
   registerMapCommands(program, writeOut);
+  registerTelemetryCommand(program, writeOut);
   registerEvalCommands(program, writeOut, () => opts.adapter ?? new CodexAdapter());
 
   return program;
