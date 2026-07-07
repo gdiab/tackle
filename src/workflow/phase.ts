@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Adapter, Effort, TurnResult } from "../adapter/types.js";
 import { readTestMap, TEST_MAP_FILE } from "../map/store.js";
+import { recordedRun } from "../telemetry/record.js";
 import { readArtifact, removeArtifact } from "./artifacts.js";
 import { sha256 } from "./hash.js";
 import type { Presenter } from "./presenter.js";
@@ -249,13 +250,17 @@ export async function runPhase(opts: RunPhaseOptions): Promise<PhaseOutcome> {
       ...(retryNote === undefined ? {} : { retryNote }),
       ...(testMapPath === undefined ? {} : { testMapPath }),
     });
-    const result = await opts.adapter.run({
-      prompt,
-      workdir,
-      effort: opts.effort ?? "medium",
-      ...(opts.model === undefined ? {} : { model: opts.model }),
-      ...(opts.timeoutMs === undefined ? {} : { timeoutMs: opts.timeoutMs }),
-    });
+    const result = await recordedRun(
+      opts.adapter,
+      {
+        prompt,
+        workdir,
+        effort: opts.effort ?? "medium",
+        ...(opts.model === undefined ? {} : { model: opts.model }),
+        ...(opts.timeoutMs === undefined ? {} : { timeoutMs: opts.timeoutMs }),
+      },
+      { repoDir: workdir, context: `phase:${opts.phase}` },
+    );
     lastTurn = result;
 
     // Billing gate: fail closed — only "subscription" passes (SPEC "Gate

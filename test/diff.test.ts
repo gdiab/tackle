@@ -89,4 +89,21 @@ describe("workdir diff", () => {
     expect(diff).toContain("real-change.txt");
     expect(diff).not.toContain(".tackle");
   });
+
+  it("excludes a tracked, modified .tackle/decisions.md from the diff", async () => {
+    const dir = makeRepo();
+    const git = (...args: string[]) => execFileSync("git", ["-C", dir, ...args]);
+    mkdirSync(join(dir, ".tackle"), { recursive: true });
+    writeFileSync(join(dir, ".tackle", "decisions.md"), "# decisions\n\noriginal\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "track decisions.md");
+    const base = await resolveHead(dir);
+    writeFileSync(join(dir, ".tackle", "decisions.md"), "# decisions\n\nupdated\n");
+    writeFileSync(join(dir, "real-change.txt"), "content\n");
+    const diff = await captureWorkdirDiff(dir, base);
+    expect(diff).toContain("real-change.txt");
+    expect(diff).toContain("+content");
+    expect(diff).not.toContain("decisions.md");
+    expect(diff).not.toContain("updated");
+  });
 });

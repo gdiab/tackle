@@ -6,4 +6,5 @@
 .superpowers/
 node_modules/
 dist/
-.tackle/
+.tackle/*
+!.tackle/decisions.md

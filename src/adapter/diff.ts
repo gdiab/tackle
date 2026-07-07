@@ -15,11 +15,14 @@ export async function resolveHead(workdir: string): Promise<string> {
 }
 
 export async function captureWorkdirDiff(workdir: string, baseRef: string): Promise<string> {
-  const tracked = await git(workdir, ["diff", baseRef]);
-
-  // .tackle/ is harness-owned state (transcripts from this and prior turns),
+  // .tackle/ is harness-owned state (transcripts from this and prior turns,
+  // plus decisions.md which the review workflow rewrites after every commit),
   // not part of any turn's diff -- exclude it here so every adapter inherits
   // the filter rather than each having to know to avoid diffing its own state.
+  // Pathspec exclusion (":(exclude)...") is safe for `git diff`; the
+  // exits-1-on-ignored-pathspec hazard applies to `git add`, not `git diff`.
+  const tracked = await git(workdir, ["diff", baseRef, "--", ".", ":(exclude).tackle"]);
+
   const untrackedList = (await git(workdir, ["ls-files", "-z", "--others", "--exclude-standard"]))
     .split("\0")
     .filter((f) => f.length > 0 && f !== ".tackle" && !f.startsWith(".tackle/"));

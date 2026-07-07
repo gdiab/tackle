@@ -6,6 +6,7 @@ import { Command, InvalidArgumentError, Option } from "commander";
 import { ClaudeAdapter } from "./adapter/claude/index.js";
 import { CodexAdapter } from "./adapter/codex/index.js";
 import type { Adapter, Effort } from "./adapter/types.js";
+import { appendDecision, DECISIONS_FILE, formatDecisionId, readDecisions } from "./decisions/store.js";
 import { listFixtures } from "./evals/manifest.js";
 import { readResult } from "./evals/results.js";
 import { checkFixture, runFixture } from "./evals/runner.js";
@@ -15,6 +16,9 @@ import { createVitestCoverageRunner } from "./map/coverage.js";
 import { describeMap, testsFor } from "./map/query.js";
 import { readTestMap, TEST_MAP_FILE, writeTestMap } from "./map/store.js";
 import type { TestMapFile } from "./map/types.js";
+import { readTurnRecords } from "./telemetry/ledger.js";
+import { recordedRun } from "./telemetry/record.js";
+import { computeTelemetryReport, renderTelemetryReport } from "./telemetry/report.js";
 import { runPhase } from "./workflow/phase.js";
 import type { Presenter } from "./workflow/presenter.js";
 import { TerminalPresenter } from "./workflow/presenter.js";
@@ -30,6 +34,15 @@ function parseTimeout(v: string): number {
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) throw new InvalidArgumentError("timeout must be a positive number");
   return n;
+}
+
+function parseSince(v: string): number {
+  const m = /^(\d+)([dh])$/.exec(v);
+  const n = Number(m?.[1]);
+  if (m === null || !Number.isFinite(n) || n <= 0) {
+    throw new InvalidArgumentError("since must look like 7d or 24h");
+  }
+  return n * (m[2] === "d" ? 86_400_000 : 3_600_000);
 }
 
 function withTurnOptions(cmd: Command): Command {
@@ -119,6 +132,74 @@ function registerMapCommands(program: Command, writeOut: (s: string) => void): v
       writeOut(`built ${status.builtAt} (${status.mode})\n`);
       writeOut(`${status.testCount} test file(s) -> ${status.sourceCount} source file(s)\n`);
       for (const testFile of status.coverageFailures) writeOut(`coverage failed: ${testFile}\n`);
+    });
+}
+
+function registerTelemetryCommand(program: Command, writeOut: (s: string) => void): void {
+  program
+    .command("telemetry")
+    .description("Cost and friction report computed fresh from .tackle/telemetry/turns.jsonl")
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .option("--json", "print the report as JSON")
+    .option("--since <duration>", "trailing window like 7d or 24h (default: all records)", parseSince)
+    .action(async (options: { cwd: string; json?: boolean; since?: number }) => {
+      const { records, malformed } = await readTurnRecords(options.cwd);
+      if (malformed > 0) process.stderr.write(`warning: skipped ${malformed} malformed ledger line(s)\n`);
+      const since = options.since;
+      const windowed =
+        since === undefined
+          ? records
+          : records.filter((r) => {
+              const t = Date.parse(r.at);
+              return Number.isFinite(t) && t >= Date.now() - since;
+            });
+      if (windowed.length === 0 && malformed === 0) {
+        writeOut("no turns recorded\n");
+        return;
+      }
+      const report = computeTelemetryReport(windowed);
+      writeOut(
+        options.json === true
+          ? JSON.stringify({ ...report, malformed }, null, 2) + "\n"
+          : renderTelemetryReport(report, { malformed }),
+      );
+    });
+}
+
+function registerDecisionCommands(program: Command, writeOut: (s: string) => void): void {
+  const decision = program.command("decision").description(`Append-only decision log (${DECISIONS_FILE})`);
+  const collect = (value: string, previous: string[]): string[] => [...previous, value];
+
+  decision
+    .command("add")
+    .description("Append a decision entry")
+    .argument("<title>", "one-line title")
+    .requiredOption("--decision <text>", "what was decided")
+    .option("--rejected <text>", "a rejected alternative (repeatable)", collect, [] as string[])
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .action(async (title: string, options: { decision: string; rejected: string[]; cwd: string }) => {
+      const id = await appendDecision(options.cwd, {
+        title,
+        decision: options.decision,
+        rejected: options.rejected,
+        source: "human",
+      });
+      writeOut(`${id} recorded in ${DECISIONS_FILE}\n`);
+    });
+
+  decision
+    .command("list")
+    .description("List decision entries, one line each")
+    .option("--cwd <dir>", "working directory", process.cwd())
+    .action(async (options: { cwd: string }) => {
+      const entries = await readDecisions(options.cwd);
+      if (entries.length === 0) {
+        writeOut(`no decisions recorded (${DECISIONS_FILE})\n`);
+        return;
+      }
+      for (const e of entries) {
+        writeOut(`${formatDecisionId(e.id)}  ${e.date}  ${e.title}  (${e.source})\n`);
+      }
     });
 }
 
@@ -240,13 +321,17 @@ export function buildProgram(
       .argument("<prompt>", "the prompt for the turn"),
   ).action(async (prompt: string, options: PhaseCliOptions) => {
     const adapter = opts.adapter ?? new CodexAdapter();
-    const result = await adapter.run({
-      prompt,
-      workdir: options.cwd,
-      effort: options.effort,
-      model: options.model,
-      timeoutMs: options.timeout === undefined ? undefined : options.timeout * 1000,
-    });
+    const result = await recordedRun(
+      adapter,
+      {
+        prompt,
+        workdir: options.cwd,
+        effort: options.effort,
+        model: options.model,
+        timeoutMs: options.timeout === undefined ? undefined : options.timeout * 1000,
+      },
+      { repoDir: options.cwd, context: "turn" },
+    );
     writeOut(JSON.stringify(result, null, 2) + "\n");
     if (result.status !== "completed") process.exitCode = 1;
   });
@@ -362,6 +447,8 @@ export function buildProgram(
     });
 
   registerMapCommands(program, writeOut);
+  registerTelemetryCommand(program, writeOut);
+  registerDecisionCommands(program, writeOut);
   registerEvalCommands(program, writeOut, () => opts.adapter ?? new CodexAdapter());
 
   return program;
