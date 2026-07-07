@@ -69,4 +69,26 @@ describe("parseDiffStats", () => {
   it("is total garbage-tolerant: nonsense input yields []", () => {
     expect(parseDiffStats("not a diff\nat all\n")).toEqual([]);
   });
+
+  it("merges counts when a file appears twice in one diff", () => {
+    const twice = [
+      "diff --git a/src/a.ts b/src/a.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -1,1 +1,2 @@",
+      " keep",
+      "+one",
+      "diff --git a/src/a.ts b/src/a.ts",
+      "index 2222222..3333333 100644",
+      "--- a/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -5,2 +6,1 @@",
+      "-gone",
+      "-also gone",
+      "+two",
+      "",
+    ].join("\n");
+    expect(parseDiffStats(twice)).toEqual([{ path: "src/a.ts", insertions: 2, deletions: 2 }]);
+  });
 });
