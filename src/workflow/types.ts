@@ -28,6 +28,10 @@ export interface PhaseState {
   commitSha?: string;
   /** review only: the escalation detail from the fix loop, re-surfaced when a pending gate is resumed. */
   gateDetail?: string;
+  /** review only: number of reviewer rounds recorded in review.md, for the auto-decision entry. */
+  reviewRounds?: number;
+  /** review only: blocking-finding one-line summaries carried into an escalated gate. */
+  escalatedFindings?: string[];
 }
 
 export interface WorkflowState {

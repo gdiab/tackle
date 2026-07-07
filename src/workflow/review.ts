@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { captureWorkdirDiff, git, resolveHead } from "../adapter/diff.js";
 import type { Adapter, Effort, TurnResult } from "../adapter/types.js";
+import { appendDecision } from "../decisions/store.js";
 import { recordedRun } from "../telemetry/record.js";
 import { readArtifact, removeArtifact } from "./artifacts.js";
 import { sha256 } from "./hash.js";
@@ -143,6 +144,26 @@ async function commitReviewed(
   review.artifactHash = sha256(artifact);
   await writeWorkflowState(workdir, state);
   presenter.inform(`committed ${sha.slice(0, 10)}`);
+  // Auto-record the decision-shaped moment (SPEC decisions.md). The commit
+  // already happened: a failed write warns and never changes the outcome.
+  try {
+    const firstLine = state.request.split("\n")[0] ?? state.request;
+    const escalated = review.escalatedFindings ?? [];
+    const base = `committed \`${sha.slice(0, 10)}\` after ${review.reviewRounds ?? 1} review round(s)`;
+    await appendDecision(
+      workdir,
+      escalated.length > 0
+        ? {
+            title: firstLine,
+            decision: `${base}, despite ${escalated.length} unresolved blocking finding(s): ${escalated.join("; ")}`,
+            rejected: ["reject and discard the review"],
+            source: "workflow",
+          }
+        : { title: firstLine, decision: base, rejected: [], source: "workflow" },
+    );
+  } catch (err) {
+    presenter.inform(`warning: decision entry not recorded: ${err instanceof Error ? err.message : String(err)}`);
+  }
   return "approved";
 }
 
@@ -308,7 +329,10 @@ async function reviewLoop(ctx: LoopContext): Promise<PhaseOutcome> {
         status: "awaiting_approval",
         lastTurn: toTurnRecord(result),
         reviewedDiffHash: sha256(currentDiff),
-        ...(escalation === undefined ? {} : { gateDetail: escalation }),
+        reviewRounds: rounds.length,
+        ...(escalation === undefined
+          ? {}
+          : { gateDetail: escalation, escalatedFindings: blocking.map((f) => f.summary) }),
       };
       await writeWorkflowState(workdir, state);
       return presentReviewGateAndCommit(workdir, state, presenter, escalation);
