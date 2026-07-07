@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildProgram } from "../src/cli.js";
 import type { Adapter, TurnResult } from "../src/adapter/types.js";
+import { tempWorkdir } from "./helpers/workflow.js";
 
 const fakeResult: TurnResult = {
   status: "completed",
@@ -17,17 +18,21 @@ const fakeResult: TurnResult = {
 
 describe("tackle turn", () => {
   it("runs the adapter with parsed options and prints the TurnResult", async () => {
+    const dir = await tempWorkdir();
     const run = vi.fn(async () => fakeResult);
     const adapter: Adapter = { name: "codex", run };
     const out: string[] = [];
     const program = buildProgram({ adapter, writeOut: (s) => out.push(s) });
     program.exitOverride();
 
-    await program.parseAsync(["turn", "fix the bug", "--effort", "high", "--timeout", "30"], { from: "user" });
+    await program.parseAsync(
+      ["turn", "fix the bug", "--effort", "high", "--timeout", "30", "--cwd", dir],
+      { from: "user" },
+    );
 
     expect(run).toHaveBeenCalledWith({
       prompt: "fix the bug",
-      workdir: process.cwd(),
+      workdir: dir,
       effort: "high",
       model: undefined,
       timeoutMs: 30_000,

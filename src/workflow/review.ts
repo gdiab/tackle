@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { captureWorkdirDiff, git, resolveHead } from "../adapter/diff.js";
 import type { Adapter, Effort, TurnResult } from "../adapter/types.js";
+import { recordedRun } from "../telemetry/record.js";
 import { readArtifact, removeArtifact } from "./artifacts.js";
 import { sha256 } from "./hash.js";
 import type { PhaseOutcome } from "./phase.js";
@@ -368,12 +369,16 @@ async function runFixTurn(
     const prompt =
       buildFixPrompt({ findings, request: state.request }) +
       (retryNote === undefined ? "" : `\n\n## Previous attempt\n\n${retryNote}`);
-    const result = await ctx.author.run({
-      prompt,
-      workdir,
-      effort: ctx.effort ?? "medium",
-      ...(ctx.timeoutMs === undefined ? {} : { timeoutMs: ctx.timeoutMs }),
-    });
+    const result = await recordedRun(
+      ctx.author,
+      {
+        prompt,
+        workdir,
+        effort: ctx.effort ?? "medium",
+        ...(ctx.timeoutMs === undefined ? {} : { timeoutMs: ctx.timeoutMs }),
+      },
+      { repoDir: workdir, context: "review:fix" },
+    );
     lastTurn = result;
     const billingHalt = billingHaltMessage(result.usage.billingType);
     if (billingHalt !== null) return { halt: await haltReview(workdir, state, result, presenter, billingHalt) };
@@ -407,13 +412,17 @@ async function runReviewerTurn(
     const prompt =
       buildReviewPrompt({ diff: currentDiff, requirement: ctx.requirement }) +
       (retryNote === undefined ? "" : `\n\n## Previous attempt\n\n${retryNote}`);
-    const result = await ctx.reviewer.run({
-      prompt,
-      workdir,
-      effort: ctx.effort ?? "medium",
-      ...(ctx.model === undefined ? {} : { model: ctx.model }),
-      ...(ctx.timeoutMs === undefined ? {} : { timeoutMs: ctx.timeoutMs }),
-    });
+    const result = await recordedRun(
+      ctx.reviewer,
+      {
+        prompt,
+        workdir,
+        effort: ctx.effort ?? "medium",
+        ...(ctx.model === undefined ? {} : { model: ctx.model }),
+        ...(ctx.timeoutMs === undefined ? {} : { timeoutMs: ctx.timeoutMs }),
+      },
+      { repoDir: workdir, context: "review:reviewer" },
+    );
     lastTurn = result;
 
     const billingHalt = billingHaltMessage(result.usage.billingType);

@@ -16,6 +16,7 @@ import { describeMap, testsFor } from "./map/query.js";
 import { readTestMap, TEST_MAP_FILE, writeTestMap } from "./map/store.js";
 import type { TestMapFile } from "./map/types.js";
 import { readTurnRecords } from "./telemetry/ledger.js";
+import { recordedRun } from "./telemetry/record.js";
 import { computeTelemetryReport, renderTelemetryReport } from "./telemetry/report.js";
 import { runPhase } from "./workflow/phase.js";
 import type { Presenter } from "./workflow/presenter.js";
@@ -282,13 +283,17 @@ export function buildProgram(
       .argument("<prompt>", "the prompt for the turn"),
   ).action(async (prompt: string, options: PhaseCliOptions) => {
     const adapter = opts.adapter ?? new CodexAdapter();
-    const result = await adapter.run({
-      prompt,
-      workdir: options.cwd,
-      effort: options.effort,
-      model: options.model,
-      timeoutMs: options.timeout === undefined ? undefined : options.timeout * 1000,
-    });
+    const result = await recordedRun(
+      adapter,
+      {
+        prompt,
+        workdir: options.cwd,
+        effort: options.effort,
+        model: options.model,
+        timeoutMs: options.timeout === undefined ? undefined : options.timeout * 1000,
+      },
+      { repoDir: options.cwd, context: "turn" },
+    );
     writeOut(JSON.stringify(result, null, 2) + "\n");
     if (result.status !== "completed") process.exitCode = 1;
   });
